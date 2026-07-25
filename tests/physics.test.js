@@ -6,6 +6,7 @@ import { SurfaceMap, SURFACE } from '../src/track/SurfaceMap.js';
 import { Vehicle } from '../src/game/Vehicle.js';
 import { Driver } from '../src/game/Driver.js';
 import { machineParams, MACHINES, ENERGY } from '../src/game/Machines.js';
+import { Race, RACE_STATE } from '../src/game/Race.js';
 
 /**
  * Headless simulation of the AI driving each circuit.
@@ -296,4 +297,142 @@ test('the recharge strip rewards going slowly', () => {
   assert.ok(slow > 0, `crossing slowly should recharge (got ${slow.toFixed(1)})`);
   assert.ok(slow > fast * 1.8,
     `recharge is time-based: slow ${slow.toFixed(1)} should far exceed fast ${fast.toFixed(1)}`);
+});
+
+test('a coated corner is survivable at a sensible speed', () => {
+  // Ice is invisible to a curvature scan, so a driver that only reads geometry
+  // arrives at full pace and understeers into the outside rail every lap. This
+  // is the regression guard for that.
+  const def = TRACKS.find((t) => t.id === 'azure-drift');
+  const r = simulate(def, 'blue-falcon', 120);
+  assert.ok(r.alive, `destroyed after ${r.time.toFixed(1)}s on the coated circuit`);
+  assert.ok(r.laps >= 1, `only ${r.laps} laps`);
+  assert.ok(r.minEnergy > 15,
+    `energy fell to ${r.minEnergy.toFixed(0)} — the coated corner is grinding the rail`);
+});
+
+test('a full race runs to the finish on every circuit', () => {
+  // End-to-end: build a real grid, run it under AI, and require that the race
+  // actually reaches a finished state with a complete classification.
+  for (const def of TRACKS) {
+    const path = new TrackPath(def.controlPoints, {
+      step: 1.25, autoBank: 22, maxAutoBank: 16, defaultWidth: def.width,
+    });
+    const surfaces = new SurfaceMap(path, def.zones);
+    const race = new Race({
+      path, surfaces, trackDef: def, machineId: 'blue-falcon',
+      // Practice keeps the full grid but disables the qualification cut, so
+      // this exercises the race machinery without also asserting a balance
+      // outcome that depends on how the AI's dice land.
+      mode: 'practice', difficulty: 1, opponents: 11,
+    });
+    race.autopilot = true;
+
+    const idle = { steer: 0, throttle: 0, brake: 0, leanLeft: 0, leanRight: 0 };
+    let guard = 0;
+    while (race.state !== RACE_STATE.FINISHED && guard < 120 * 400) {
+      race.update(DT, idle);
+      race.clearEvents();
+      guard++;
+      if (race.state === RACE_STATE.RETIRED) break;
+    }
+
+    assert.equal(race.state, RACE_STATE.FINISHED,
+      `${def.id}: race ended as "${race.state}" after ${(guard * DT).toFixed(0)}s`);
+
+    const standings = race.standings();
+    assert.equal(standings.length, race.fieldSize);
+    // Ranks must be a clean 1..N with no duplicates.
+    assert.deepEqual(standings.map((e) => e.rank), standings.map((_, i) => i + 1));
+    assert.ok(standings[0].finishTime > 0);
+    // Everyone must have completed the full lap count.
+    for (const e of standings) {
+      assert.ok(e.finished, `${def.id}: ${e.name} never finished`);
+    }
+  }
+});
+
+test('lap counting cannot be cheated by cutting the course', () => {
+  // Progress is integrated arc length, so teleporting forward must not bank a
+  // lap. Drop the machine most of the way around the circuit and confirm the
+  // lap counter does not move.
+  const def = TRACKS[0];
+  const { path, surfaces } = buildTrack(def);
+  const race = new Race({
+    path, surfaces, trackDef: def, machineId: 'blue-falcon',
+    mode: 'trial', difficulty: 1, opponents: 0,
+  });
+  race.state = RACE_STATE.RACING;
+  const e = race.playerEntry;
+  const v = race.player;
+  const idle = { steer: 0, throttle: 0, brake: 0, leanLeft: 0, leanRight: 0 };
+
+  race.update(DT, idle);
+  const lapBefore = e.lap;
+  const distBefore = e.distance;
+
+  // Teleport 90% of a lap forward.
+  path.toWorld(path.length * 0.9, 0, v.params.rideHeight, v.pos);
+  race.update(DT, idle);
+
+  assert.equal(e.lap, lapBefore, 'a teleport must not complete a lap');
+  assert.ok(Math.abs(e.distance - distBefore) < 5,
+    `banked ${(e.distance - distBefore).toFixed(0)}m of progress from a teleport`);
+});
+
+test('the qualifying cut eliminates a player who falls behind', () => {
+  // The cut is the mechanic that gives a race its shape, so it needs to
+  // actually fire. Park the player and confirm they are disqualified rather
+  // than trundling around at the back for three laps.
+  const def = TRACKS[0];
+  const { path, surfaces } = buildTrack(def);
+  const race = new Race({
+    path, surfaces, trackDef: def, machineId: 'blue-falcon',
+    mode: 'race', difficulty: 1, opponents: 11,
+  });
+  assert.ok(race.qualifyRank > 2 && race.qualifyRank < race.fieldSize,
+    `lap-one cut of ${race.qualifyRank} in a field of ${race.fieldSize} is unreasonable`);
+
+  // Drive the mechanic directly rather than by simulation. A parked machine
+  // gets destroyed first — the rest of the field laps into it at 120 m/s —
+  // which is correct behaviour but tests the wrong thing.
+  race.state = RACE_STATE.RACING;
+  const e = race.playerEntry;
+  e.lap = 0;
+  e.rank = race.fieldSize;             // dead last
+  race._checkQualification();
+  assert.equal(race.state, RACE_STATE.RETIRED);
+  assert.equal(race.retireReason, 'RANK');
+});
+
+test('a player inside the cut is not eliminated', () => {
+  const def = TRACKS[0];
+  const { path, surfaces } = buildTrack(def);
+  const race = new Race({
+    path, surfaces, trackDef: def, machineId: 'blue-falcon',
+    mode: 'race', difficulty: 1, opponents: 11,
+  });
+  race.state = RACE_STATE.RACING;
+  race.playerEntry.lap = 0;
+  race.playerEntry.rank = race.qualifyRank;   // exactly on the cut
+  race._checkQualification();
+  assert.equal(race.state, RACE_STATE.RACING);
+});
+
+test('practice mode keeps the grid but never eliminates', () => {
+  const def = TRACKS[0];
+  const { path, surfaces } = buildTrack(def);
+  const race = new Race({
+    path, surfaces, trackDef: def, machineId: 'blue-falcon',
+    mode: 'practice', difficulty: 1, opponents: 11,
+  });
+  assert.equal(race.fieldSize, 12);
+  assert.equal(race.qualifyRank, null);
+
+  // Even dead last, the rank cut must never fire in practice. (Destruction
+  // still ends a run — practice removes the elimination rule, not the physics.)
+  race.state = RACE_STATE.RACING;
+  race.playerEntry.rank = race.fieldSize;
+  race._checkQualification();
+  assert.notEqual(race.state, RACE_STATE.RETIRED, 'practice must never disqualify on rank');
 });

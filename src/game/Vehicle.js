@@ -70,6 +70,12 @@ export class Vehicle {
     this.airborne = false;
     this.airTime = 0;
 
+    // Brief invulnerability after a discrete hit. Mines sit close enough
+    // together that a machine crossing a field diagonally can clip three in a
+    // fifth of a second, which is an unreadable instant kill rather than a
+    // penalty. The original solved this the same way, with a hurt timer.
+    this.hurtTimer = 0;
+
     this.surface = SURFACE.ROAD;
     this.onRail = false;
     this.railIntensity = 0;
@@ -147,6 +153,7 @@ export class Vehicle {
 
     this.prevPos.copy(this.pos);
     this.prevQuat.copy(this.quat);
+    if (this.hurtTimer > 0) this.hurtTimer = Math.max(0, this.hurtTimer - dt);
 
     // --- 1. where are we on the track --------------------------------
     this.path.project(this.pos.x, this.pos.y, this.pos.z, this.s, this._proj);
@@ -262,7 +269,9 @@ export class Vehicle {
     this.slipping = !this.gripped && Math.abs(steer) > 0.15;
 
     let gripRate = this.gripped ? p.gripRate : p.slipGripRate;
-    if (this.surface === SURFACE.ICE) gripRate = 0.06;   // momentum only
+    // Momentum only. Not literally zero: a coated corner should be a corner
+    // you have to respect, not one that is mathematically impossible to make.
+    if (this.surface === SURFACE.ICE) gripRate = 0.4;
     if (this.airborne) gripRate *= 0.25;
 
     // Rebuild the velocity from its along-heading and lateral components so the
@@ -420,9 +429,17 @@ export class Vehicle {
     }
   }
 
-  /** Apply a discrete hit (mine, collision). */
-  damage(amount, impactScale = 0.6) {
+  /**
+   * Apply a discrete hit (mine, collision).
+   * @param {boolean} [major] Major hits respect and then re-arm the
+   *        invulnerability window; continuous drains bypass it entirely.
+   */
+  damage(amount, impactScale = 0.6, major = false) {
     if (!this.alive) return;
+    if (major) {
+      if (this.hurtTimer > 0) return;
+      this.hurtTimer = 0.7;
+    }
     this.energy -= amount / (this.params.armour || 1);
     this.events.impact = Math.max(this.events.impact, impactScale);
     if (this.energy <= 0) {
@@ -432,8 +449,8 @@ export class Vehicle {
   }
 
   hitMine() {
-    if (!this.alive) return;
-    this.damage(ENERGY.mineHit, 1);
+    if (!this.alive || this.hurtTimer > 0) return;
+    this.damage(ENERGY.mineHit, 1, true);
     this.events.mine = true;
     this.speed *= 0.55;
     // Mines throw the machine off line rather than simply slowing it.

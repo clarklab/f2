@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clamp, clamp01, damp, lerp, makeRng } from '../core/MathUtil.js';
 import { TrackFrame } from '../track/TrackPath.js';
+import { SURFACE } from '../track/SurfaceMap.js';
 import { BOOST } from './Machines.js';
 
 /**
@@ -56,6 +57,8 @@ export class Driver {
     this.wobbleAmp = lerp(0.16, 0.02, this.skill);
     this.wobbleRate = 0.5 + r() * 0.9;
     this.boostAppetite = lerp(0.35, 0.95, this.skill);
+    // How slowly this driver is willing to creep across a coated surface.
+    this.iceSpeed = lerp(34, 48, this.skill);
 
     this._steer = 0;
     this._throttle = 1;
@@ -150,6 +153,82 @@ export class Driver {
     return limit;
   }
 
+  /**
+   * The slowest speed any coated (zero-grip) surface in the next `distance`
+   * metres demands, or Infinity if the road ahead is dry.
+   *
+   * Ice is invisible to a curvature scan — the corner radius does not change,
+   * only the machine's ability to follow it — so a driver that only reads
+   * geometry arrives at a coated corner at full pace and understeers straight
+   * into the outside rail. Every single time.
+   */
+  iceSpeedLimit(path, s, distance) {
+    const surfaces = this.v.track;
+    if (!surfaces?.surfaceAt) return Infinity;
+    const STEPS = 10;
+    for (let i = 1; i <= STEPS; i++) {
+      const ahead = s + (distance * i) / STEPS;
+      if (surfaces.surfaceAt(ahead, this._targetD) === SURFACE.ICE) {
+        // Scale with how soon it arrives, so the machine eases down rather than
+        // stamping on the brakes the instant a coated corner comes into view.
+        const nearness = 1 - (i - 1) / STEPS;
+        return lerp(this.v.params.topSpeed * 0.62, this.iceSpeed, nearness);
+      }
+    }
+    return Infinity;
+  }
+
+  /**
+   * Pick the best lane to be in a short distance ahead.
+   *
+   * Samples the surface across the road at a lookahead point and scores each
+   * candidate, then nudges the target line toward the best one. Without this
+   * the AI drives the geometric racing line straight through mine fields and
+   * rough patches, because curvature is all it can see — on the hazard-heavy
+   * circuits that is fatal within a lap, and it also means the AI ignores every
+   * boost pad on the track.
+   *
+   * Scoring is relative to the line the driver already wants, so it weaves
+   * around hazards rather than abandoning the racing line entirely.
+   */
+  chooseLane(path, s, desiredD) {
+    const surfaces = this.v.track;
+    if (!surfaces?.surfaceAt) return desiredD;
+
+    const lookahead = clamp(this.v.speed * 0.55, 22, 80);
+    // Three samples, and the near one matters most. With only far samples, a
+    // machine already inside a mine field sees clear road beyond it and steers
+    // back onto the racing line — straight through the mines it has left.
+    const sNear = s + Math.max(6, this.v.speed * 0.14);
+    const sA = s + lookahead * 0.55;
+    const sB = s + lookahead;
+    const halfWidth = path.widthAt(sB) * 0.5;
+
+    const COST = {
+      [SURFACE.ROAD]: 0,
+      [SURFACE.BOOST]: -14,        // actively worth deviating for
+      [SURFACE.RECHARGE]: 0,
+      [SURFACE.JUMP]: -2,
+      [SURFACE.DIRT]: 26,
+      [SURFACE.ICE]: 18,
+      [SURFACE.MINES]: 150,        // never worth it
+    };
+
+    let bestD = desiredD;
+    let bestScore = Infinity;
+    const LANES = 9;
+    for (let i = 0; i < LANES; i++) {
+      const d = (-1 + (2 * i) / (LANES - 1)) * halfWidth * 0.88;
+      let score = (COST[surfaces.surfaceAt(sNear, d)] ?? 0) * 1.6
+        + (COST[surfaces.surfaceAt(sA, d)] ?? 0) * 0.8
+        + (COST[surfaces.surfaceAt(sB, d)] ?? 0) * 0.5;
+      // Prefer staying near the intended line; deviating costs lap time.
+      score += Math.abs(d - desiredD) * 0.55;
+      if (score < bestScore) { bestScore = score; bestD = d; }
+    }
+    return bestD;
+  }
+
   update(dt, time, opponents) {
     const v = this.v;
     const path = v.path;
@@ -199,6 +278,10 @@ export class Driver {
       }
     }
 
+    // Hazard avoidance runs after the racing line and after traffic, so a
+    // mine field overrides both.
+    targetD = this.chooseLane(path, v.s, targetD);
+
     const halfWidth = path.widthAt(v.s) * 0.5;
     targetD = clamp(targetD, -halfWidth * 0.94, halfWidth * 0.94);
     this._targetD = targetD;
@@ -221,7 +304,8 @@ export class Driver {
     // of what the cornering-limit maths says.
     const needsTurning = Math.abs(this._steer) > 0.25;
     const slipCeiling = needsTurning ? p.slipSpeed * 1.02 : Infinity;
-    const target = Math.min(limit, slipCeiling) * lerp(0.86, 1.0, this.skill);
+    const iceLimit = this.iceSpeedLimit(path, v.s, clamp(v.speed * 1.6, 70, 190));
+    const target = Math.min(limit, slipCeiling, iceLimit) * lerp(0.86, 1.0, this.skill);
 
     this._overspeed = v.speed / Math.max(1, target);
 

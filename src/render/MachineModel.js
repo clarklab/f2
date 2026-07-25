@@ -142,19 +142,21 @@ export function buildMachineGeometry(machine) {
       b.box({ z: 0.1, w: 1.55, h: 0.6, l: 5.6, wFront: 0.3, hFront: 0.3, color: c.body, yFront: -0.18 });
       b.box({ x: -1.95, z: 0.35, w: 1.2, h: 0.72, l: 4.2, wFront: 0.62, hFront: 0.46, color: c.body, yFront: -0.06 });
       b.box({ x: 1.95, z: 0.35, w: 1.2, h: 0.72, l: 4.2, wFront: 0.62, hFront: 0.46, color: c.body, yFront: -0.06 });
+      b.box({ z: 0.3, w: 4.5, h: 0.2, l: 4.8, color: shade(c.body, -0.34) });                  // underbody
       b.box({ z: -1.3, w: 4.6, h: 0.2, l: 1.5, wFront: 3.4, color: shade(c.body, -0.22) });   // front wing
       b.box({ z: 1.9, w: 4.8, h: 0.22, l: 0.9, color: shade(c.body, -0.22) });                 // rear wing
       b.box({ y: 0.46, z: 0.5, w: 0.92, h: 0.44, l: 2.0, wFront: 0.46, hFront: 0.2, color: c.accent });
       b.box({ x: -1.95, y: 0.02, z: 2.42, w: 0.86, h: 0.5, l: 0.3, color: ENGINE });
       b.box({ x: 1.95, y: 0.02, z: 2.42, w: 0.86, h: 0.5, l: 0.3, color: ENGINE });
-      b.box({ x: -2.5, y: 0.5, z: 1.9, w: 0.24, h: 0.8, l: 0.8, color: c.trim });              // fins
-      b.box({ x: 2.5, y: 0.5, z: 1.9, w: 0.24, h: 0.8, l: 0.8, color: c.trim });
+      b.box({ x: -2.5, y: 0.42, z: 1.95, w: 0.2, h: 0.55, l: 0.7, color: c.trim });            // fins
+      b.box({ x: 2.5, y: 0.42, z: 1.95, w: 0.2, h: 0.55, l: 0.7, color: c.trim });
     },
     'golden-fox': () => {
       // Short, wide and stubby — reads instantly as the nimble one.
       b.box({ z: 0.1, w: 2.0, h: 0.56, l: 4.4, wFront: 0.5, hFront: 0.28, color: c.body, yFront: -0.14 });
       b.box({ x: -1.85, z: 0.2, w: 1.3, h: 0.6, l: 3.8, wFront: 0.85, hFront: 0.4, color: shade(c.body, -0.14) });
       b.box({ x: 1.85, z: 0.2, w: 1.3, h: 0.6, l: 3.8, wFront: 0.85, hFront: 0.4, color: shade(c.body, -0.14) });
+      b.box({ z: 0.2, w: 4.4, h: 0.2, l: 4.2, color: shade(c.body, -0.34) });                  // underbody
       b.box({ z: -1.5, w: 4.9, h: 0.2, l: 1.0, wFront: 4.2, color: c.trim });
       b.box({ y: 0.42, z: 0.3, w: 1.05, h: 0.42, l: 1.7, wFront: 0.56, hFront: 0.22, color: c.accent });
       b.box({ x: -1.85, y: 0.0, z: 2.16, w: 0.95, h: 0.42, l: 0.3, color: ENGINE });
@@ -165,6 +167,7 @@ export function buildMachineGeometry(machine) {
       b.box({ z: 0, w: 2.3, h: 0.95, l: 5.0, wFront: 0.85, hFront: 0.5, color: c.body, yFront: -0.1 });
       b.box({ x: -2.1, z: 0.3, w: 1.35, h: 0.95, l: 4.2, wFront: 1.0, hFront: 0.65, color: shade(c.body, -0.2) });
       b.box({ x: 2.1, z: 0.3, w: 1.35, h: 0.95, l: 4.2, wFront: 1.0, hFront: 0.65, color: shade(c.body, -0.2) });
+      b.box({ z: 0.2, w: 5.0, h: 0.22, l: 4.6, color: shade(c.body, -0.34) });                 // underbody
       b.box({ y: 0.66, z: 0.4, w: 1.2, h: 0.46, l: 1.8, wFront: 0.68, hFront: 0.24, color: c.accent });
       b.box({ y: 0.62, z: 2.1, w: 3.0, h: 0.5, l: 0.5, color: c.trim });
       b.box({ x: -2.1, y: 0.0, z: 2.36, w: 1.0, h: 0.6, l: 0.3, color: ENGINE });

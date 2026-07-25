@@ -9,10 +9,7 @@ export default defineConfig({
     target: 'es2020',
     outDir: 'dist',
     assetsInlineLimit: 0,
-    rollupOptions: {
-      output: {
-        manualChunks: { three: ['three'] },
-      },
-    },
+    // No manual chunking: the game is one bundle plus three.js, and it is all
+    // needed before the first frame. Splitting it would only add a round trip.
   },
 });
