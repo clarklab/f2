@@ -83,3 +83,22 @@ export function formatTime(seconds) {
   const cs = Math.floor((seconds * 100) % 100);
   return `${m}'${String(s).padStart(2, '0')}"${String(cs).padStart(2, '0')}`;
 }
+
+/** The aspect ratio every camera FOV in the game was tuned against. */
+export const REF_ASPECT = 270 / 480;
+
+/**
+ * Convert a vertical FOV tuned at REF_ASPECT into the vertical FOV that gives
+ * the same *horizontal* field at some other aspect ratio.
+ *
+ * A perspective camera holds its vertical FOV fixed, so a taller-than-9:16
+ * frame — which is every phone — silently narrows the horizontal field and the
+ * track comes out wider on screen than it was tuned to be. Pinning the
+ * horizontal field instead keeps the composition identical and spends the extra
+ * rows on seeing further ahead.
+ */
+export function fitFov(tunedDeg, aspect) {
+  if (Math.abs(aspect - REF_ASPECT) < 1e-4) return tunedDeg;
+  const halfH = Math.atan(Math.tan((tunedDeg * Math.PI) / 360) * REF_ASPECT);
+  return (Math.atan(Math.tan(halfH) / aspect) * 360) / Math.PI;
+}

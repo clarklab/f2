@@ -98,11 +98,30 @@ one.
 
 ## How it renders
 
-The scene is drawn into a **270×480 render target** and blitted 1:1 to a canvas
-that CSS scales up with nearest-neighbour filtering. That is ~130k pixels
-against a modern phone's 2.6M, and shading 5% of the pixels is what buys the
-frame budget. It is also what makes the image read as pixel art: the chunkiness
-is real, not a post-process.
+The scene is drawn into a render target of roughly **270×520** and blitted 1:1
+to a canvas that CSS scales up with nearest-neighbour filtering. That is ~140k
+pixels against a modern phone's 2.6M, and shading 5% of the pixels is what buys
+the frame budget. It is also what makes the image read as pixel art: the
+chunkiness is real, not a post-process.
+
+*Roughly*, because there is no one right resolution. 270 across is the authored
+width, but a fixed 270×480 is 9:16 and no phone on sale is 9:16 — pinning the
+game to it letterboxes every real device, which on a black page just looks
+broken. So the height follows the screen and the width is held near 270, subject
+to one constraint: each game pixel must cover a whole number of device pixels.
+
+```
+step = round(deviceWidth / 270)      device pixels per game pixel
+W, H = deviceWidth / step, deviceHeight / step
+```
+
+The integer `step` is the part that matters. A fractional one puts some game
+pixels on 3 device pixels and their neighbours on 4, and the art crawls whenever
+anything moves — the one artefact a pixel-art game cannot hide. Taking the
+rounding on the *resolution* instead, as a couple of extra or missing rows, is
+invisible. Camera FOVs are then corrected to hold the *horizontal* field fixed
+(`fitFov`), so the track is exactly as wide on screen as it was tuned to be and
+a taller phone spends its extra rows seeing further ahead.
 
 The blit does the retro grade in one pass — sRGB conversion, then
 5-bit-per-channel quantisation with an 8×8 ordered dither. The conversion has to

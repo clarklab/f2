@@ -27,10 +27,9 @@ html, body {
 }
 
 body {
-  display: grid;
-  place-items: center;
-  /* Fall back to vh where dvh is unsupported; dvh avoids the mobile URL-bar
-     resize jump that would otherwise re-letterbox mid-race. */
+  /* Fall back to vh where dvh is unsupported. Neither unit is trusted for
+     layout — the stage is placed from `visualViewport` in JS — but the body
+     still has to cover the screen so nothing white shows through. */
   height: 100vh;
   height: 100dvh;
   color: #cfd6ff;
@@ -38,9 +37,18 @@ body {
 }
 
 #stage {
-  position: relative;
+  /* Position and size come from JS, against the *visual* viewport. Centring in
+     the body instead would drift on mobile, where the body keeps the layout
+     viewport's height while the URL bar eats the bottom of the visual one.
+
+     On anything portrait this ends up covering the screen exactly: the internal
+     resolution is chosen to match the device's aspect ratio rather than the
+     other way round, so there is nothing to letterbox. A desktop window is the
+     only case too wide to fill, and there the box is centred. */
+  position: fixed;
+  left: 0;
+  top: 0;
   line-height: 0;
-  /* Sized in JS to an exact integer multiple of the internal resolution. */
 }
 
 #stage canvas {

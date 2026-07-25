@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { clamp01, damp, lerp } from '../core/MathUtil.js';
+import { clamp01, damp, lerp, fitFov, REF_ASPECT } from '../core/MathUtil.js';
 
 /**
  * ChaseCamera.
@@ -43,6 +43,9 @@ export class ChaseCamera {
     this.lookHeight = 3.4;
     this.baseFov = 58;
     this.speedFov = 20;          // total FOV kick across the speed range
+    // Both FOV numbers were tuned against a 9:16 frame; the internal resolution
+    // now follows the device, so they get corrected for the real aspect ratio.
+    this.aspect = REF_ASPECT;
     this.yawLag = 6.5;           // lower = more lag = more whip
     this.posLag = 26;
     this.rollBlend = 0.42;       // how much of the track's banking to adopt
@@ -124,7 +127,7 @@ export class ChaseCamera {
     this.camera.up.copy(this.up);
     this.camera.lookAt(this._look);
 
-    const fov = this.baseFov + this.speedFov * speed01 + boost * 6;
+    const fov = fitFov(this.baseFov + this.speedFov * speed01 + boost * 6, this.aspect);
     if (Math.abs(this.camera.fov - fov) > 0.01) {
       this.camera.fov = damp(this.camera.fov, fov, 9, dt);
       this.camera.updateProjectionMatrix();
