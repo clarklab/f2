@@ -1,0 +1,378 @@
+import { loop, resolveZones } from './LoopBuilder.js';
+
+/**
+ * Circuit definitions.
+ *
+ * Each track is described as a drive around it — straights in metres, corners
+ * as an angle and a radius — and `loop()` turns that into control points with a
+ * guaranteed-smooth join at the start line. Segments carry names so that
+ * surface zones can say "the middle of the back straight" instead of "58.2% of
+ * a lap", and stay correct when a corner is retuned.
+ *
+ * The layouts are original, but the design vocabulary is deliberately borrowed
+ * from the 1990 original: a zero-grip coating on the corner that decides the
+ * lap, a mid-lap pit that costs real time to use, mine fields with exactly one
+ * clean lane through them, and a constant crosswind that is worse when slow.
+ */
+
+export const THEMES = {
+  city: {
+    name: 'MUTE CITY',
+    sky: [[0, 0x0b1030], [0.42, 0x2a3a7a], [0.7, 0x6a7ac0], [1, 0xc8b0d8]],
+    fog: 0x6a7ac0,
+    fogNear: 60,
+    fogFar: 430,
+    markerColor: 0xff6a92,
+    ground: { color: 0x171b34, y: -34 },
+    scenery: 'towers',
+    track: {
+      road: 0x9aa0ab, roadDark: 0x767c88, rung: 0x5c626e,
+      stripe: 0xffffff, stripe2: 0x2a2f3d, shoulder: 0x0d0f18,
+      shoulderLight: 0x1b1f30, seed: 3, rungEvery: 16,
+    },
+  },
+  ocean: {
+    name: 'BIG BLUE',
+    sky: [[0, 0x071a3a], [0.4, 0x1e64b4], [0.72, 0x63b8e8], [1, 0xcfeaff]],
+    fog: 0x63b8e8,
+    fogNear: 70,
+    fogFar: 460,
+    markerColor: 0xffb03a,
+    ground: { color: 0x2b57b8, y: -26, wave: true },
+    scenery: 'buoys',
+    track: {
+      road: 0xa8aec4, roadDark: 0x848aa4, rung: 0x666c88,
+      stripe: 0xfff4d0, stripe2: 0x2a2038, shoulder: 0x120c22,
+      shoulderLight: 0x231838, seed: 11, rungEvery: 16,
+    },
+  },
+  desert: {
+    name: 'SAND OCEAN',
+    sky: [[0, 0x2a1436], [0.36, 0x8a3a52], [0.66, 0xdc8a5a], [1, 0xf6d9a0]],
+    fog: 0xdc8a5a,
+    fogNear: 55,
+    fogFar: 400,
+    markerColor: 0x6ad8ff,
+    ground: { color: 0xa8763f, y: -20, dunes: true },
+    scenery: 'spires',
+    track: {
+      road: 0x9c9184, roadDark: 0x7a7166, rung: 0x5e564d,
+      stripe: 0xffe9b0, stripe2: 0x2c2118, shoulder: 0x140f0a,
+      shoulderLight: 0x241a12, seed: 21, rungEvery: 16,
+    },
+  },
+  grid: {
+    name: 'SILENCE',
+    sky: [[0, 0x05060f], [0.45, 0x0d1430], [0.75, 0x1c2d5a], [1, 0x38507e]],
+    fog: 0x1c2d5a,
+    fogNear: 50,
+    fogFar: 380,
+    markerColor: 0x7dff9c,
+    ground: { color: 0x0a0d18, y: -40, gridLines: true },
+    scenery: 'pylons',
+    track: {
+      road: 0x8790a0, roadDark: 0x646c7e, rung: 0x474e5e,
+      stripe: 0x9dffb8, stripe2: 0x12261c, shoulder: 0x07110c,
+      shoulderLight: 0x0f2018, seed: 33, rungEvery: 12,
+    },
+  },
+  wind: {
+    name: 'DEATH WIND',
+    sky: [[0, 0x1a1020], [0.4, 0x4a3050], [0.7, 0x9a7a82], [1, 0xd8c2b0]],
+    fog: 0x9a7a82,
+    fogNear: 45,
+    fogFar: 340,
+    markerColor: 0xffe14d,
+    ground: { color: 0x4a3f46, y: -30 },
+    scenery: 'spires',
+    track: {
+      road: 0x93989e, roadDark: 0x70757c, rung: 0x53585f,
+      stripe: 0xffe14d, stripe2: 0x2b2418, shoulder: 0x110e0c,
+      shoulderLight: 0x201a16, seed: 44, rungEvery: 14,
+    },
+  },
+  fire: {
+    name: 'FIRE FIELD',
+    sky: [[0, 0x1c0408], [0.34, 0x6e1010], [0.62, 0xc4401a], [1, 0xf5a83c]],
+    fog: 0xc4401a,
+    fogNear: 45,
+    fogFar: 360,
+    markerColor: 0x66f0ff,
+    ground: { color: 0x8a1e10, y: -28, lava: true },
+    scenery: 'spires',
+    track: {
+      road: 0x8b8078, roadDark: 0x69605a, rung: 0x4c4540,
+      stripe: 0xffd06a, stripe2: 0x2a1008, shoulder: 0x150604,
+      shoulderLight: 0x2a100a, seed: 57, rungEvery: 12,
+    },
+  },
+};
+
+const DEFS = [
+  // ---------------------------------------------------------------------
+  {
+    id: 'neon-mile',
+    name: 'NEON MILE',
+    subtitle: 'MUTE CITY',
+    theme: 'city',
+    difficulty: 1,
+    laps: 3,
+    width: 30,
+    // Wide and forgiving: two gentle rights onto a long backstretch carrying a
+    // jump plate, a chicane on the far side, then square corners home.
+    layout: [
+      { s: 220, name: 'home-straight' },
+      { turn: 45, r: 150, name: 't1' },
+      { s: 90 },
+      { turn: 45, r: 150, name: 't2' },
+      { s: 300, name: 'backstretch', y: 7 },
+      { turn: 90, r: 120, name: 't3', y: 0 },
+      { s: 260, name: 'east-straight' },
+      { turn: 55, r: 130, name: 'chicane-in' },
+      { turn: -55, r: 150, name: 'chicane-out' },
+      { s: 120, name: 'link' },
+      { turn: 90, r: 110, name: 't4' },
+      { s: 240, name: 'south-straight' },
+      { turn: 90, r: 95, name: 'final-turn' },
+      { s: 140, name: 'run-in' },
+    ],
+    zones: [
+      { type: 'recharge', seg: 'home-straight', at: [0.18, 0.75], dMin: -1.0, dMax: -0.42 },
+      { type: 'dirt', seg: 't1', at: [0.2, 0.9], dMin: -1.0, dMax: -0.5 },
+      { type: 'boost', seg: 'backstretch', at: [0.12, 0.22], dMin: -0.3, dMax: 0.3 },
+      { type: 'jump', seg: 'backstretch', at: [0.62, 0.7], dMin: -0.34, dMax: 0.34 },
+      { type: 'dirt', seg: 'east-straight', at: [0.25, 0.6], dMin: 0.44, dMax: 1.0 },
+      { type: 'dirt', seg: 'south-straight', at: [0.3, 0.7], dMin: -1.0, dMax: -0.46 },
+      { type: 'boost', seg: 'run-in', at: [0.15, 0.55], dMin: -0.28, dMax: 0.28 },
+    ],
+  },
+
+  // ---------------------------------------------------------------------
+  {
+    id: 'azure-drift',
+    name: 'AZURE DRIFT',
+    subtitle: 'BIG BLUE',
+    theme: 'ocean',
+    difficulty: 2,
+    laps: 3,
+    width: 32,
+    // Broad and flowing over open water. Everything here is a setup for the
+    // last corner, which is coated and has no grip at all — you arrive at full
+    // speed and steer the nose while the machine keeps going straight.
+    layout: [
+      { s: 180, name: 'home-straight' },
+      { turn: 70, r: 170, name: 't1', y: 4 },
+      { s: 140, y: 8 },
+      { turn: -40, r: 180, name: 'kink-a' },
+      { turn: 40, r: 180, name: 'kink-b', y: 10 },
+      { s: 220, name: 'north-straight', y: 12 },
+      { turn: 90, r: 150, name: 't2', y: 8 },
+      { s: 260, name: 'backstretch', y: 0 },
+      { turn: 60, r: 140, name: 't3', y: -4 },
+      { s: 100, name: 'link' },
+      { turn: 50, r: 120, name: 't4', y: 0 },
+      { s: 180, name: 'approach' },
+      { turn: 90, r: 110, name: 'coated-corner' },
+      { s: 160, name: 'run-in' },
+    ],
+    zones: [
+      { type: 'recharge', seg: 'home-straight', at: [0.15, 0.8], dMin: -1.0, dMax: -0.44 },
+      { type: 'dirt', seg: 't1', at: [0.25, 0.85], dMin: 0.46, dMax: 1.0 },
+      { type: 'boost', seg: 'north-straight', at: [0.2, 0.32], dMin: -0.3, dMax: 0.3 },
+      { type: 'dirt', seg: 'backstretch', at: [0.3, 0.62], dMin: -1.0, dMax: -0.48 },
+      { type: 'boost', seg: 'backstretch', at: [0.75, 0.86], dMin: -0.3, dMax: 0.3 },
+      { type: 'ice', seg: 'approach', at: [0.72, 1.0], dMin: -1.0, dMax: 1.0 },
+      { type: 'ice', seg: 'coated-corner', at: [0.0, 1.0], dMin: -1.0, dMax: 1.0 },
+    ],
+  },
+
+  // ---------------------------------------------------------------------
+  {
+    id: 'dune-sea',
+    name: 'DUNE SEA',
+    subtitle: 'SAND OCEAN',
+    theme: 'desert',
+    difficulty: 3,
+    laps: 3,
+    width: 28,
+    // Long constant-radius sweepers over rolling dunes. No mines, no ice — a
+    // pure cornering exam where the only punishment is losing momentum.
+    layout: [
+      { s: 200, name: 'home-straight' },
+      { turn: 80, r: 200, name: 't1', y: 10 },
+      { s: 180, name: 'rise', y: 16 },
+      { turn: 70, r: 220, name: 't2', y: 12 },
+      { s: 150, name: 'link-a' },
+      { turn: -50, r: 200, name: 't3', y: 4 },
+      { s: 120, name: 'link-b' },
+      { turn: 50, r: 180, name: 't4', y: 0 },
+      { s: 260, name: 'north-straight', y: -6 },
+      { turn: 90, r: 160, name: 't5', y: -8 },
+      { s: 300, name: 'backstretch', y: 0 },
+      { turn: 120, r: 140, name: 'long-left', y: 6 },
+      { s: 180, name: 'link-c' },
+      { turn: -60, r: 170, name: 'chicane-in' },
+      { turn: 60, r: 150, name: 'chicane-out', y: 0 },
+      { s: 220, name: 'run-in' },
+    ],
+    zones: [
+      { type: 'recharge', seg: 'home-straight', at: [0.15, 0.78], dMin: 0.44, dMax: 1.0 },
+      { type: 'dirt', seg: 't1', at: [0.2, 0.75], dMin: -1.0, dMax: -0.44 },
+      { type: 'boost', seg: 'rise', at: [0.25, 0.45], dMin: -0.3, dMax: 0.3 },
+      { type: 'dirt', seg: 't3', at: [0.15, 0.85], dMin: 0.44, dMax: 1.0 },
+      { type: 'jump', seg: 'north-straight', at: [0.55, 0.63], dMin: -0.34, dMax: 0.34 },
+      { type: 'dirt', seg: 'backstretch', at: [0.25, 0.55], dMin: -1.0, dMax: -0.4 },
+      { type: 'boost', seg: 'backstretch', at: [0.72, 0.82], dMin: -0.3, dMax: 0.3 },
+      { type: 'dirt', seg: 'link-c', at: [0.2, 0.8], dMin: 0.4, dMax: 1.0 },
+    ],
+  },
+
+  // ---------------------------------------------------------------------
+  {
+    id: 'silent-grid',
+    name: 'SILENT GRID',
+    subtitle: 'SILENCE',
+    theme: 'grid',
+    difficulty: 4,
+    laps: 3,
+    width: 24,
+    // Square corners and narrow corridors. Each mine field leaves exactly one
+    // clean lane, and it is never the lane you would take for the next corner.
+    layout: [
+      { s: 160, name: 'home-straight' },
+      { turn: 90, r: 70, name: 'c1' },
+      { s: 180, name: 'a' },
+      { turn: 90, r: 65, name: 'c2' },
+      { s: 120, name: 'b' },
+      { turn: -90, r: 70, name: 'c3' },
+      { s: 140, name: 'c' },
+      { turn: -45, r: 80, name: 's-in' },
+      { turn: 45, r: 70, name: 's-out' },
+      { s: 200, name: 'd' },
+      { turn: 90, r: 60, name: 'c4' },
+      { s: 160, name: 'e' },
+      { turn: 90, r: 60, name: 'c5' },
+      { s: 130, name: 'f' },
+      { turn: 90, r: 70, name: 'c6' },
+      { s: 180, name: 'run-in' },
+    ],
+    zones: [
+      { type: 'recharge', seg: 'home-straight', at: [0.15, 0.8], dMin: -1.0, dMax: -0.46 },
+      { type: 'boost', seg: 'a', at: [0.2, 0.36], dMin: -0.3, dMax: 0.3 },
+      { type: 'dirt', seg: 'b', at: [0.2, 0.8], dMin: 0.46, dMax: 1.0 },
+      { type: 'mines', seg: 'c', at: [0.1, 0.9], dMin: -0.45, dMax: 1.0 },
+      { type: 'boost', seg: 'd', at: [0.3, 0.44], dMin: -0.3, dMax: 0.3 },
+      { type: 'dirt', seg: 'e', at: [0.25, 0.8], dMin: -1.0, dMax: -0.42 },
+      { type: 'mines', seg: 'f', at: [0.1, 0.9], dMin: -1.0, dMax: 0.4 },
+      { type: 'boost', seg: 'run-in', at: [0.2, 0.45], dMin: -0.28, dMax: 0.28 },
+    ],
+  },
+
+  // ---------------------------------------------------------------------
+  {
+    id: 'gale-spine',
+    name: 'GALE SPINE',
+    subtitle: 'DEATH WIND',
+    theme: 'wind',
+    difficulty: 4,
+    laps: 3,
+    width: 22,
+    // Geometrically the simplest circuit here — a rounded rectangle — made
+    // difficult purely by a constant crosswind and a chain of dash plates that
+    // have to be hit on line. The pit sits mid-lap, so using it costs you.
+    layout: [
+      { s: 300, name: 'home-straight' },
+      { turn: 90, r: 120, name: 'c1', y: 10 },
+      { s: 220, name: 'north', y: 14 },
+      { turn: 90, r: 120, name: 'c2', y: 8 },
+      { s: 300, name: 'backstretch', y: 0 },
+      { turn: 90, r: 120, name: 'c3' },
+      { s: 220, name: 'south' },
+      { turn: 90, r: 120, name: 'c4' },
+    ],
+    // A constant lateral push in world space. Because it is an acceleration
+    // rather than a drag, it hurts more the slower you are going — which is
+    // exactly what makes recovering from a mistake here so punishing.
+    wind: { x: 5.6, z: 1.0 },
+    zones: [
+      { type: 'dirt', seg: 'home-straight', at: [0.55, 0.85], dMin: -1.0, dMax: -0.42 },
+      { type: 'boost', seg: 'north', at: [0.15, 0.34], dMin: -0.32, dMax: 0.32 },
+      { type: 'boost', seg: 'north', at: [0.55, 0.74], dMin: -0.32, dMax: 0.32 },
+      { type: 'recharge', seg: 'backstretch', at: [0.28, 0.72], dMin: 0.4, dMax: 1.0 },
+      { type: 'dirt', seg: 'south', at: [0.2, 0.55], dMin: -1.0, dMax: -0.44 },
+      { type: 'boost', seg: 'south', at: [0.7, 0.92], dMin: -0.32, dMax: 0.32 },
+    ],
+  },
+
+  // ---------------------------------------------------------------------
+  {
+    id: 'ember-core',
+    name: 'EMBER CORE',
+    subtitle: 'FIRE FIELD',
+    theme: 'fire',
+    difficulty: 5,
+    laps: 3,
+    width: 26,
+    // The finale: roughly half again as long as the opener and the only circuit
+    // carrying every hazard class at once. Energy attrition, not lap time, is
+    // the real opponent.
+    layout: [
+      { s: 220, name: 'home-straight' },
+      { turn: 60, r: 170, name: 't1' },
+      { s: 180, name: 'a' },
+      { turn: 70, r: 150, name: 't2', y: 8 },
+      { s: 240, name: 'b', y: 12 },
+      { turn: -45, r: 160, name: 't3', y: 6 },
+      { s: 140, name: 'c' },
+      { turn: 45, r: 140, name: 't4', y: 0 },
+      { s: 300, name: 'long-straight' },
+      { turn: 90, r: 130, name: 't5', y: -6 },
+      { s: 260, name: 'backstretch', y: 0 },
+      { turn: 30, r: 120, name: 't6' },
+      { s: 160, name: 'd' },
+      { turn: -55, r: 150, name: 'chicane-in' },
+      { turn: 55, r: 130, name: 'chicane-out' },
+      { s: 220, name: 'e' },
+      { turn: 55, r: 110, name: 't7' },
+      { s: 180, name: 'f' },
+      { turn: 55, r: 140, name: 't8' },
+      { s: 200, name: 'run-in' },
+    ],
+    zones: [
+      { type: 'mines', seg: 'a', at: [0.1, 0.85], dMin: -0.5, dMax: 0.5 },
+      { type: 'boost', seg: 'b', at: [0.15, 0.28], dMin: -0.3, dMax: 0.3 },
+      { type: 'dirt', seg: 'c', at: [0.1, 0.9], dMin: 0.42, dMax: 1.0 },
+      { type: 'jump', seg: 'long-straight', at: [0.42, 0.5], dMin: -0.34, dMax: 0.34 },
+      { type: 'dirt', seg: 'backstretch', at: [0.2, 0.55], dMin: -1.0, dMax: -0.44 },
+      { type: 'ice', seg: 'd', at: [0.0, 1.0], dMin: -1.0, dMax: 1.0 },
+      { type: 'ice', seg: 'chicane-in', at: [0.0, 0.8], dMin: -1.0, dMax: 1.0 },
+      { type: 'mines', seg: 'e', at: [0.2, 0.6], dMin: -0.42, dMax: 0.42 },
+      { type: 'boost', seg: 'f', at: [0.25, 0.45], dMin: -0.3, dMax: 0.3 },
+      { type: 'recharge', seg: 'run-in', at: [0.05, 0.5], dMin: -1.0, dMax: -0.42 },
+      { type: 'boost', seg: 'run-in', at: [0.62, 0.82], dMin: -0.3, dMax: 0.3 },
+    ],
+  },
+];
+
+/** Build every circuit once, at module load. */
+export const TRACKS = DEFS.map((def) => {
+  const built = loop(def.layout, { width: def.width, spacing: 32 });
+  return {
+    ...def,
+    controlPoints: built.points,
+    zones: resolveZones(def.zones, built),
+    approxLength: built.length,
+    closureGap: built.closureGap,
+  };
+});
+
+export function trackById(id) {
+  return TRACKS.find((t) => t.id === id) ?? TRACKS[0];
+}
+
+/** The championship running order, easiest first. */
+export const GRAND_PRIX = {
+  id: 'knight',
+  name: 'KNIGHT CUP',
+  trackIds: TRACKS.map((t) => t.id),
+};
