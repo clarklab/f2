@@ -8,7 +8,9 @@
  * extra request, and so the title screen never flashes an empty logo while a
  * separate file loads.
  *
- * This is the one piece of art in the project that is not generated at runtime.
+ * This is the one piece of art that is baked at build time rather than
+ * synthesised at runtime. It is still original — nothing here is sourced from
+ * outside the project.
  */
 
 export const LOGO_WIDTH = 240;

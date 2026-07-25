@@ -5,12 +5,12 @@ Real 3D geometry — banked corners, elevation changes, hills — rendered at a 
 internal resolution so it reads as authentic 16-bit pixel art rather than as a
 filter over a modern scene.
 
-**Everything is generated at runtime, with one exception.** No textures, no
-models, no audio files, no fonts — the road surface, the machines, the sky, the
-HUD typeface, the engine note and the music are all synthesised when the page
-loads. The exception is the V-ZERO wordmark on the title screen, which is
-supplied artwork (see [The logo](#the-logo)). The build is one JavaScript file
-and one stylesheet.
+**No outside assets.** Nothing is sourced from anywhere — every pixel and every
+sound is original. The road surface, the machines, the sky, the HUD typeface,
+the engine note and the music are all synthesised in code when the page loads;
+the V-ZERO wordmark is original art baked into the bundle at build time (see
+[The logo](#the-logo)). The build is one JavaScript file and one stylesheet,
+with no images, audio or fonts alongside them.
 
 ```
 npm install
@@ -117,10 +117,11 @@ giveaway that a "pixel art" game is not really one.
 
 ## The logo
 
-The V-ZERO wordmark is the one piece of art in the project that is not
-generated. It arrives as a 2172x724 print-resolution image on a black field and
-has to end up as a sprite on a 270x480 UI canvas, so `tools/make-logo.mjs`
-bakes it down. Three things happen, in this order, and the order matters:
+The V-ZERO wordmark is the one piece of art that is baked at build time rather
+than synthesised at runtime. It starts as a 2172x724 print-resolution image on a
+black field and has to end up as a sprite on a 270x480 UI canvas, so
+`tools/make-logo.mjs` bakes it down. Three things happen, in this order, and the
+order matters:
 
 1. **Key the background** by flood-filling black inward from the borders. A
    plain "all black is transparent" test punches holes in the letterforms — the
@@ -200,6 +201,9 @@ counted as grinding against each other.
   the gesture handler does no real work and there is no hitch on the first tap.
 - `localStorage` is optional; the game runs identically without it.
 - Re-bake the logo with `node tools/make-logo.mjs tools/logo-source.png 240`.
+- `netlify.toml` builds before publishing. Without it Netlify serves the repo
+  root, which means raw unbundled source and a bare `three` import the browser
+  cannot resolve — the page loads and the game never starts.
 - Press `F3` for a draw-call and frame-rate readout, `M` to mute.
 
 ## Licence

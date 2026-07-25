@@ -127,9 +127,7 @@ export class UI {
 
     this.rect(0, this.H - 32, W, 32, 'rgba(8,11,22,0.66)');
     this.text('BUILT WITH THREE.JS', W / 2, this.H - 26, { scale: 1, align: 'center', color: PAL.dim });
-    // Deliberately says "world, models and sound" rather than "everything":
-    // the wordmark above is supplied artwork, not generated.
-    this.text('PROCEDURAL WORLD, MODELS AND SOUND', W / 2, this.H - 16, {
+    this.text('NO OUTSIDE ASSETS - ALL ORIGINAL', W / 2, this.H - 16, {
       scale: 1, align: 'center', color: PAL.dim,
     });
   }
