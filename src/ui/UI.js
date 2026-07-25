@@ -1,6 +1,7 @@
 import { drawText, textWidth } from './BitmapFont.js';
 import { drawMinimap, trackPreview } from './Minimap.js';
 import { formatTime, clamp01, clamp } from '../core/MathUtil.js';
+import { loadLogo, logoImage, LOGO_WIDTH, LOGO_HEIGHT } from './logo.js';
 
 /**
  * UI — every screen and the in-race HUD, drawn into the 2D overlay canvas at
@@ -32,6 +33,8 @@ export class UI {
     this.W = display.width;
     this.H = display.height;
     this.time = 0;
+    // Start decoding immediately; the title screen is the first thing drawn.
+    loadLogo();
   }
 
   clear() {
@@ -95,26 +98,38 @@ export class UI {
     const { W } = this;
     const bob = Math.sin(this.time * 1.6) * 2;
 
-    // Wordmark. Drawn twice with an offset to fake a chromatic edge, which is
-    // a period-appropriate way to make flat text feel energetic.
-    this.text('VELOCITY', W / 2 + 1, 96 + bob, { scale: 4, align: 'center', color: PAL.accent2, shadow: null });
-    this.text('VELOCITY', W / 2, 95 + bob, { scale: 4, align: 'center', color: PAL.ink, shadow: PAL.dark });
-    this.text('ZERO', W / 2 + 1, 133 + bob, { scale: 6, align: 'center', color: PAL.accent, shadow: null });
-    this.text('ZERO', W / 2, 132 + bob, { scale: 6, align: 'center', color: PAL.ink, shadow: PAL.dark });
+    const logo = logoImage();
+    const logoY = 74 + bob;
+    if (logo) {
+      this.ctx.drawImage(logo, Math.round((W - LOGO_WIDTH) / 2), Math.round(logoY));
+    } else {
+      // The sprite is a data URI so it decodes almost immediately, but drawing
+      // nothing at all on the very first frames would be a visible blink.
+      this.text('V-ZERO', W / 2, logoY + 20, {
+        scale: 5, align: 'center', color: PAL.ink, shadow: PAL.dark,
+      });
+    }
 
-    this.rect(W / 2 - 74, 182 + bob, 148, 1, PAL.accent);
-    this.text('ANTI-GRAVITY GRAND PRIX', W / 2, 190 + bob, {
-      scale: 1, align: 'center', color: PAL.dim,
+    const underY = logoY + LOGO_HEIGHT + 14;
+    this.rect(W / 2 - 96, underY - 6, 192, 1, PAL.accent);
+    this.text('VELOCITY ZERO RACING LEAGUE', W / 2, underY, {
+      scale: 1, align: 'center', color: PAL.accent, tracking: 2,
     });
 
+    // The flythrough runs behind all of this, and the road is bright. Both of
+    // the lower text blocks need something to sit on.
+    this.rect(0, 294, W, 22, 'rgba(8,11,22,0.66)');
     if (this.blink(1.0, 0.62)) {
       this.text(canContinue ? 'TAP OR PRESS ENTER' : 'TAP TO START', W / 2, 300, {
         scale: 2, align: 'center', color: PAL.warn,
       });
     }
 
+    this.rect(0, this.H - 32, W, 32, 'rgba(8,11,22,0.66)');
     this.text('BUILT WITH THREE.JS', W / 2, this.H - 26, { scale: 1, align: 'center', color: PAL.dim });
-    this.text('NO ASSETS - EVERYTHING GENERATED', W / 2, this.H - 16, {
+    // Deliberately says "world, models and sound" rather than "everything":
+    // the wordmark above is supplied artwork, not generated.
+    this.text('PROCEDURAL WORLD, MODELS AND SOUND', W / 2, this.H - 16, {
       scale: 1, align: 'center', color: PAL.dim,
     });
   }

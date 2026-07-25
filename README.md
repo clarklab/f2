@@ -5,10 +5,12 @@ Real 3D geometry — banked corners, elevation changes, hills — rendered at a 
 internal resolution so it reads as authentic 16-bit pixel art rather than as a
 filter over a modern scene.
 
-**Every asset is generated at runtime.** No textures, no models, no audio files,
-no fonts. The whole thing is code: the road surface, the machines, the sky, the
+**Everything is generated at runtime, with one exception.** No textures, no
+models, no audio files, no fonts — the road surface, the machines, the sky, the
 HUD typeface, the engine note and the music are all synthesised when the page
-loads. The build is one JavaScript file and one stylesheet.
+loads. The exception is the V-ZERO wordmark on the title screen, which is
+supplied artwork (see [The logo](#the-logo)). The build is one JavaScript file
+and one stylesheet.
 
 ```
 npm install
@@ -113,6 +115,28 @@ how sprite-era art actually looked. The underglow is an additive quad with a
 dithered radial falloff — a smooth gradient there is the single clearest
 giveaway that a "pixel art" game is not really one.
 
+## The logo
+
+The V-ZERO wordmark is the one piece of art in the project that is not
+generated. It arrives as a 2172x724 print-resolution image on a black field and
+has to end up as a sprite on a 270x480 UI canvas, so `tools/make-logo.mjs`
+bakes it down. Three things happen, in this order, and the order matters:
+
+1. **Key the background** by flood-filling black inward from the borders. A
+   plain "all black is transparent" test punches holes in the letterforms — the
+   counter of the R and the gaps in the Z are black too, and are part of the
+   design. Flood filling only removes black connected to the outside.
+2. **Downscale with premultiplied alpha.** Without premultiplying, every partly
+   transparent edge pixel blends toward the black underneath it and the wordmark
+   comes out ringed in mud.
+3. **Quantise to 5 bits per channel with an ordered dither**, matching what the
+   renderer does to the 3D scene. The UI is a separate overlay canvas that does
+   not pass through that shader, so skipping this leaves the logo as the one
+   smoothly shaded thing on screen.
+
+The result is inlined as a base64 data URI, so the build stays a single bundle
+and the title never flashes an empty logo while a separate file loads.
+
 ## Architecture
 
 ```
@@ -175,6 +199,7 @@ counted as grinding against each other.
 - Audio is built before the first user gesture and only *resumed* inside it, so
   the gesture handler does no real work and there is no hitch on the first tap.
 - `localStorage` is optional; the game runs identically without it.
+- Re-bake the logo with `node tools/make-logo.mjs tools/logo-source.png 240`.
 - Press `F3` for a draw-call and frame-rate readout, `M` to mute.
 
 ## Licence
