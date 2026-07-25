@@ -30,12 +30,23 @@ export class UI {
   constructor(display) {
     this.display = display;
     this.ctx = display.ui;
-    this.W = display.width;
-    this.H = display.height;
     this.time = 0;
     // Start decoding immediately; the title screen is the first thing drawn.
     loadLogo();
   }
+
+  // The internal resolution follows the device's aspect ratio and changes on
+  // rotation and whenever the URL bar slides in or out, so these have to be
+  // read fresh every frame rather than cached at construction.
+  get W() { return this.display.width; }
+  get H() { return this.display.height; }
+
+  /**
+   * Rows of internal pixels this device has beyond the height the menus were
+   * authored against. Screens are taller than 9:16 now; blocks that are pinned
+   * to an absolute y share this out rather than leaving a gap at the bottom.
+   */
+  get spare() { return Math.max(0, this.H - 480); }
 
   clear() {
     this.ctx.clearRect(0, 0, this.W, this.H);
@@ -95,13 +106,20 @@ export class UI {
   // -------------------------------------------------------------------
 
   drawTitle({ canContinue = false } = {}) {
-    const { W } = this;
+    const { W, H } = this;
     const bob = Math.sin(this.time * 1.6) * 2;
 
+    // The wordmark is baked at 240 wide, which is nearly the full authored
+    // width. Only shrink it, and only when the screen is genuinely narrower —
+    // scaling a pixel-art sprite *up* by a fraction duplicates a scattering of
+    // columns and the bevel on the letterforms goes lumpy.
+    const logoW = Math.min(LOGO_WIDTH, W - 12);
+    const logoH = Math.round(LOGO_HEIGHT * (logoW / LOGO_WIDTH));
+
     const logo = logoImage();
-    const logoY = 74 + bob;
+    const logoY = Math.round(H * 0.15) + bob;
     if (logo) {
-      this.ctx.drawImage(logo, Math.round((W - LOGO_WIDTH) / 2), Math.round(logoY));
+      this.ctx.drawImage(logo, Math.round((W - logoW) / 2), Math.round(logoY), logoW, logoH);
     } else {
       // The sprite is a data URI so it decodes almost immediately, but drawing
       // nothing at all on the very first frames would be a visible blink.
@@ -110,7 +128,7 @@ export class UI {
       });
     }
 
-    const underY = logoY + LOGO_HEIGHT + 14;
+    const underY = logoY + logoH + 14;
     this.rect(W / 2 - 96, underY - 6, 192, 1, PAL.accent);
     this.text('VELOCITY ZERO RACING LEAGUE', W / 2, underY, {
       scale: 1, align: 'center', color: PAL.accent, tracking: 2,
@@ -118,16 +136,17 @@ export class UI {
 
     // The flythrough runs behind all of this, and the road is bright. Both of
     // the lower text blocks need something to sit on.
-    this.rect(0, 294, W, 22, 'rgba(8,11,22,0.66)');
+    const promptY = Math.round(H * 0.625);
+    this.rect(0, promptY - 6, W, 22, 'rgba(8,11,22,0.66)');
     if (this.blink(1.0, 0.62)) {
-      this.text(canContinue ? 'TAP OR PRESS ENTER' : 'TAP TO START', W / 2, 300, {
+      this.text(canContinue ? 'TAP OR PRESS ENTER' : 'TAP TO START', W / 2, promptY, {
         scale: 2, align: 'center', color: PAL.warn,
       });
     }
 
-    this.rect(0, this.H - 32, W, 32, 'rgba(8,11,22,0.66)');
-    this.text('BUILT WITH THREE.JS', W / 2, this.H - 26, { scale: 1, align: 'center', color: PAL.dim });
-    this.text('NO OUTSIDE ASSETS - ALL ORIGINAL', W / 2, this.H - 16, {
+    this.rect(0, H - 32, W, 32, 'rgba(8,11,22,0.66)');
+    this.text('BUILT WITH THREE.JS', W / 2, H - 26, { scale: 1, align: 'center', color: PAL.dim });
+    this.text('NO OUTSIDE ASSETS - ALL ORIGINAL', W / 2, H - 16, {
       scale: 1, align: 'center', color: PAL.dim,
     });
   }
@@ -145,9 +164,14 @@ export class UI {
     this.text(title, W / 2, 62, { scale: 2, align: 'center', color: PAL.accent });
     this.rect(W / 2 - 60, 80, 120, 1, PAL.panelEdge);
 
+    // Headings stay pinned near the top; the rows take a share of whatever
+    // extra height the device has, so a tall screen reads as a taller menu
+    // rather than as a menu with a hole underneath it.
+    const drop = this.spare * 0.35;
+
     const rects = [];
     items.forEach((item, i) => {
-      const y = top + i * rowH;
+      const y = top + drop + i * rowH;
       const sel = i === index;
       this.frame(24, y, W - 48, rowH - 6, {
         fill: sel ? '#222b4e' : PAL.panel,
@@ -183,19 +207,22 @@ export class UI {
     });
 
     // Left/right arrows sit at thumb height on the model, not at the top.
-    const arrowY = 190;
+    const arrowY = Math.round(H * 0.4);
     if (this.blink(0.9, 0.6)) {
       this.text('<', 16, arrowY, { scale: 2, color: PAL.accent });
       this.text('>', W - 26, arrowY, { scale: 2, color: PAL.accent });
     }
 
+    // The stats panel hangs off the bottom edge, not off a fixed y: the screen
+    // is as tall as the device is, and the model wants whatever is left over.
+    const panelY = H - 168;
+
     // Dots showing position in the list.
     for (let i = 0; i < total; i++) {
       const dx = W / 2 - (total * 8) / 2 + i * 8;
-      this.rect(dx, 300, 5, 3, i === index ? PAL.accent : PAL.panelEdge);
+      this.rect(dx, panelY - 12, 5, 3, i === index ? PAL.accent : PAL.panelEdge);
     }
 
-    const panelY = 312;
     this.frame(20, panelY, W - 40, 96, { fill: 'rgba(16,21,42,0.96)' });
 
     const stats = [
@@ -244,18 +271,26 @@ export class UI {
   // -------------------------------------------------------------------
 
   drawTrackSelect(tracks, paths, index, records) {
-    const { W } = this;
+    const { W, H } = this;
     this.rect(0, 0, W, 32, 'rgba(10,13,26,0.88)');
     this.text('SELECT CIRCUIT', W / 2, 20, { scale: 1, align: 'center', color: PAL.dim });
 
     const track = tracks[index];
     const path = paths[track.id];
 
-    // Big preview of the selected circuit — the top-down map.
-    const pw = 200;
-    const ph = 150;
+    // The top-down map is the whole point of this screen, so it takes whatever
+    // room the device has between the header and the selector strip rather than
+    // sitting at a fixed 200x150 with a gap underneath it on a tall phone.
+    const INFO_H = 92;
+    const TOP = 36;
+    const stripY = H - 62;
+    const room = stripY - TOP - 8;
+    let ph = Math.min(200, room - 8 - INFO_H);
+    let pw = Math.round(ph * (4 / 3));
+    if (pw > W - 24) { pw = W - 24; ph = Math.round(pw * 0.75); }
     const px = (W - pw) / 2;
-    const py = 40;
+    const py = Math.round(TOP + (room - (ph + 8 + INFO_H)) * 0.45);
+
     this.frame(px - 4, py - 4, pw + 8, ph + 8, { fill: '#0d1120' });
     if (path) {
       const prev = trackPreview(track.id, path, pw, ph, {
@@ -289,7 +324,6 @@ export class UI {
     });
 
     // Row of small previews acting as the selector.
-    const stripY = this.H - 62;
     const cell = 34;
     const totalW = tracks.length * (cell + 4) - 4;
     const startX = (W - totalW) / 2;

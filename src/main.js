@@ -4,7 +4,7 @@ import { Display } from './core/Display.js';
 import { Loop } from './core/Loop.js';
 import { Input, Action } from './core/Input.js';
 import { Save } from './core/Save.js';
-import { clamp, clamp01, damp, formatTime } from './core/MathUtil.js';
+import { clamp, clamp01, damp, formatTime, fitFov } from './core/MathUtil.js';
 import { PixelRenderer } from './render/PixelRenderer.js';
 import { World } from './render/World.js';
 import { MachineView } from './render/MachineModel.js';
@@ -29,6 +29,10 @@ import { TITLE_SONG, songForTheme } from './audio/songs.js';
  * background.
  */
 
+// Vertical FOV for the machine-select turntable, tuned at 9:16 and corrected
+// for the real aspect ratio by `fitFov`.
+const SHOWCASE_FOV = 40;
+
 const SCREEN = {
   TITLE: 'title',
   MODE: 'mode',
@@ -44,15 +48,33 @@ class Game {
   constructor() {
     this.display = new Display();
     this.input = new Input(this.display);
-    this.renderer = new PixelRenderer(this.display.sceneCanvas);
+    this.renderer = new PixelRenderer(
+      this.display.sceneCanvas, this.display.width, this.display.height,
+    );
     this.ui = new UI(this.display);
     this.audio = new Audio();
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(
-      62, this.display.width / this.display.height, 0.6, 1100,
+      fitFov(62, this.display.aspect), this.display.aspect, 0.6, 1100,
     );
     this.chaseCam = new ChaseCamera(this.camera);
+    this.chaseCam.aspect = this.display.aspect;
+
+    // The internal resolution tracks the device's aspect ratio, so it changes
+    // on rotation and every time a mobile URL bar slides in or out. Everything
+    // that caches a size has to be told.
+    this.display.onResize = (d) => {
+      this.renderer.resize(d.width, d.height);
+      this.chaseCam.aspect = d.aspect;
+      this.camera.aspect = d.aspect;
+      this.camera.updateProjectionMatrix();
+      if (this.showcase) {
+        this.showcase.camera.aspect = d.aspect;
+        this.showcase.camera.fov = fitFov(SHOWCASE_FOV, d.aspect);
+        this.showcase.camera.updateProjectionMatrix();
+      }
+    };
 
     this.time = 0;
     this.fade = 0;
@@ -200,7 +222,7 @@ class Game {
     // 9:16 frame the camera only sees about 23 degrees across. The machine is
     // 5 m wide, so it needs real distance to fit.
     const camera = new THREE.PerspectiveCamera(
-      40, this.display.width / this.display.height, 0.5, 120,
+      fitFov(SHOWCASE_FOV, this.display.aspect), this.display.aspect, 0.5, 120,
     );
     camera.position.set(0, 6.2, 20);
     camera.lookAt(0, -0.6, 0);
@@ -649,8 +671,6 @@ class Game {
     sc.view.group.position.set(0, Math.sin(this.time * 1.8) * 0.14, 0);
     sc.view.thrust.material.opacity = 0.55 + Math.sin(this.time * 6) * 0.12;
     sc.view.thrust.material.color.set(machine.colors.glow);
-    sc.camera.aspect = this.display.width / this.display.height;
-    sc.camera.updateProjectionMatrix();
     this.renderer.render(sc.scene, sc.camera);
   }
 

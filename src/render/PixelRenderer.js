@@ -85,7 +85,9 @@ void main() {
 `;
 
 export class PixelRenderer {
-  constructor(canvas) {
+  constructor(canvas, width = VIRT_W, height = VIRT_H) {
+    this._w = width;
+    this._h = height;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: false,          // only affects the default framebuffer anyway,
@@ -95,17 +97,22 @@ export class PixelRenderer {
       stencil: false,
       powerPreference: 'high-performance',
       preserveDrawingBuffer: false,
-      // Lets the compositor show our frame without waiting in its queue. It is
-      // a hint; when honoured it removes a frame of input-to-photon latency.
-      desynchronized: true,
+      // NOT `desynchronized`. It is only a latency hint, and on Chrome for
+      // Android it promotes the canvas to a hardware overlay whose bounds are
+      // computed from the drawing buffer rather than from the CSS box. With a
+      // 270-wide buffer stretched across a 1080-wide phone, the overlay lands
+      // at the wrong size and the 3D scene is drawn into a fraction of its
+      // element while the UI canvas above it is placed correctly — a black band
+      // across the top of the screen that no amount of layout work removes.
+      // One frame of latency is not worth that.
     });
     this.renderer.setPixelRatio(1);        // never render above the internal res
-    this.renderer.setSize(VIRT_W, VIRT_H, false);
+    this.renderer.setSize(width, height, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = false;
     this.renderer.info.autoReset = false;
 
-    this.target = new THREE.WebGLRenderTarget(VIRT_W, VIRT_H, {
+    this.target = new THREE.WebGLRenderTarget(width, height, {
       minFilter: THREE.NearestFilter,
       magFilter: THREE.NearestFilter,
       generateMipmaps: false,
@@ -162,8 +169,22 @@ export class PixelRenderer {
     });
   }
 
-  get width() { return VIRT_W; }
-  get height() { return VIRT_H; }
+  get width() { return this._w; }
+  get height() { return this._h; }
+
+  /**
+   * Move to a new internal resolution. The height follows the device aspect
+   * (see Display), so this runs on rotation and whenever the URL bar slides in
+   * or out. `setSize(..., false)` leaves the canvas CSS alone — the element is
+   * stretched to the stage by the stylesheet and must stay that way.
+   */
+  resize(w, h) {
+    if (w === this._w && h === this._h) return;
+    this._w = w;
+    this._h = h;
+    this.renderer.setSize(w, h, false);
+    this.target.setSize(w, h);
+  }
 
   /** Screen flash, 0..1, tinted. Used for impacts, boosts and transitions. */
   setFlash(amount, color) {

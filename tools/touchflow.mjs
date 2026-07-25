@@ -36,6 +36,24 @@ async function tapAt(fx, fy) {
   await page.waitForTimeout(320);
 }
 
+/**
+ * Tap the centre of a menu row by index. The internal resolution follows the
+ * device's aspect ratio, so a hard-coded fraction of the screen is not a stable
+ * way to hit a row — ask the game where it actually drew it.
+ */
+async function tapRow(index) {
+  const f = await page.evaluate((i) => {
+    const g = window.__game;
+    const r = g.menuRects.find((x) => x.index === i);
+    if (!r) return null;
+    const d = g.display;
+    return { fx: (r.x + r.w / 2) / d.width, fy: (r.y + r.h / 2) / d.height };
+  }, index);
+  if (!f) return false;
+  await tapAt(f.fx, f.fy);
+  return true;
+}
+
 const steps = [];
 const record = async (label, expected) => {
   const got = await screen();
@@ -48,10 +66,12 @@ await record('initial', 'title');
 await tapAt(0.5, 0.3);
 await record('after tapping title', 'mode');
 
-// Mode -> machine: tap the first row (GRAND PRIX is row 0; take SINGLE RACE so
-// the flow reaches the circuit picker rather than starting a championship).
-await tapAt(0.5, 0.355);   // second row
-await tapAt(0.5, 0.355);   // first tap selects, second confirms
+// Mode -> machine: take SINGLE RACE (row 1) so the flow reaches the circuit
+// picker rather than starting a championship. The first tap selects the row,
+// the second confirms it.
+const modeRow = await tapRow(1);
+steps.push({ label: 'mode rows are laid out', expected: true, got: modeRow, ok: modeRow });
+if (modeRow) await tapRow(1);
 await record('after choosing a mode', 'machine');
 
 // Machine -> circuit: tap the lower panel area to confirm.
@@ -61,16 +81,12 @@ await record('after choosing a machine', 'track');
 // Circuit -> race: tap the already-selected preview in the strip. This lives
 // in the bottom 10% of the screen, which is exactly the region the driving
 // control zones used to swallow.
-const strip = await page.evaluate(() => {
-  const r = window.__game.menuRects.find((x) => x.index === window.__game.trackIndex);
-  const d = window.__game.display;
-  return r ? { fx: (r.x + r.w / 2) / d.width, fy: (r.y + r.h / 2) / d.height } : null;
-});
+const trackIndex = await page.evaluate(() => window.__game.trackIndex);
+const strip = await tapRow(trackIndex);
 steps.push({
   label: 'circuit strip is laid out',
-  expected: true, got: !!strip, ok: !!strip,
+  expected: true, got: strip, ok: strip,
 });
-if (strip) await tapAt(strip.fx, strip.fy);
 await record('after tapping a circuit', 'race');
 
 // Drive with a touch drag in the steering zone and confirm input is read.

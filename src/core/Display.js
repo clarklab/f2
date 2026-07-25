@@ -1,19 +1,52 @@
+import { clamp } from './MathUtil.js';
+
 /**
- * Display — owns the two canvases and the letterboxing.
+ * Display — owns the two canvases and decides the game's internal resolution.
  *
- * The game renders at a fixed, small, portrait internal resolution and is
- * scaled up as a whole. Scaling by a whole number is what keeps every source
- * pixel exactly square on screen; a fractional scale makes some pixels one
- * device-pixel wider than their neighbours, which shows up as shimmering
- * banding across the road. Fractional scale is only used when the viewport is
- * genuinely too small to fit at 1x or larger.
+ * The whole look depends on rendering at a very low resolution and letting the
+ * browser scale it up with nearest-neighbour filtering. The question is *which*
+ * low resolution, and the honest answer is that there is no single right one:
+ * a fixed 270x480 is 9:16, and no phone on sale is 9:16. Pinning the game to it
+ * letterboxes every real device, which on a black page reads as a bug.
+ *
+ * So the resolution adapts. 270 across is the authored width and every layout
+ * coordinate is relative to it, but the *height* follows the device, and each
+ * game pixel stays a whole number of device pixels:
+ *
+ *   step = round(deviceWidth / 270)         device pixels per game pixel
+ *   W, H = deviceWidth / step, deviceHeight / step
+ *
+ * Rounding the step to an integer is the point. A fractional step means some
+ * game pixels land on 3 device pixels and their neighbours on 4, so the art
+ * crawls and shimmers whenever anything moves — the one artefact a pixel-art
+ * game cannot hide. Taking the rounding on the *resolution* instead (a couple
+ * of extra or missing rows) is invisible.
+ *
+ * The aspect ratio is clamped, because the layouts are authored for portrait
+ * and a desktop window is not portrait. Inside the clamp — which is every phone
+ * held upright — the stage is exactly the viewport and there is no letterbox at
+ * all. Outside it, we fall back to centring a portrait box.
  */
 
-// 270x480 is a 9:16 portrait frame in the same ballpark as the SNES's 256x224.
-// It is small enough that fill rate is a non-issue and large enough that the
-// bitmap font stays readable.
+/** Authored width. Every UI layout coordinate is relative to this. */
 export const VIRT_W = 270;
+/** Reference height, used only for the render target's initial allocation. */
 export const VIRT_H = 480;
+
+// Portrait phones run about 0.42 (21:9) to 0.68 (a small handset once the URL
+// bar has taken its share). The clamp covers all of it with room to spare, so
+// nothing anyone actually holds ever letterboxes. Past 0.70 is tablet and
+// desktop territory, where a portrait game has to be boxed anyway — the touch
+// band and the circuit picker both need a frame taller than it is wide.
+const MIN_ASPECT = 0.38;
+const MAX_ASPECT = 0.70;
+
+// Bounds on the internal resolution. MAX_PIXELS is the real budget: it is what
+// keeps fragment cost flat across devices no matter how tall the screen is.
+const MIN_W = 220;
+const MAX_W = 340;
+const MAX_H = 680;
+const MAX_PIXELS = 210_000;
 
 export class Display {
   constructor() {
@@ -24,47 +57,102 @@ export class Display {
 
     this.width = VIRT_W;
     this.height = VIRT_H;
+    this.pixelScale = 1;
     this.scale = 1;
 
-    // Backing stores are the internal resolution, never the device resolution.
-    // The browser does the upscale for free with nearest-neighbour filtering.
-    for (const c of [this.sceneCanvas, this.uiCanvas]) {
-      c.width = VIRT_W;
-      c.height = VIRT_H;
-    }
-
-    this.ui = this.uiCanvas.getContext('2d', { alpha: true, desynchronized: true });
-    this.ui.imageSmoothingEnabled = false;
+    this.ui = this.uiCanvas.getContext('2d', { alpha: true });
 
     this._onResize = this.resize.bind(this);
     window.addEventListener('resize', this._onResize, { passive: true });
     window.addEventListener('orientationchange', this._onResize, { passive: true });
+    // The visual viewport is the one that shrinks when the URL bar slides in,
+    // and the only one that reports the area actually on screen.
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', this._onResize, { passive: true });
+      window.visualViewport.addEventListener('scroll', this._onResize, { passive: true });
     }
+
     this.resize();
   }
 
-  get aspect() { return VIRT_W / VIRT_H; }
+  get aspect() { return this.width / this.height; }
 
+  /**
+   * Pick an internal resolution for the current viewport and size the stage to
+   * match it, so the canvases fill the screen with no black surround.
+   */
   resize() {
-    const vw = window.visualViewport?.width ?? window.innerWidth;
-    const vh = window.visualViewport?.height ?? window.innerHeight;
+    const vw = Math.max(1, window.visualViewport?.width ?? window.innerWidth);
+    const vh = Math.max(1, window.visualViewport?.height ?? window.innerHeight);
 
-    let scale = Math.min(vw / VIRT_W, vh / VIRT_H);
-    // Snap to an integer once there is room to do so without wasting more than
-    // a sliver of the screen. Below 2x, banding is less objectionable than a
-    // postage-stamp-sized game.
-    if (scale >= 2) {
-      const snapped = Math.floor(scale);
-      if (snapped / scale > 0.8) scale = snapped;
+    // The tallest box the layouts tolerate that fits the viewport. When the
+    // viewport is already inside the clamp this *is* the viewport, exactly.
+    const aspect = clamp(vw / vh, MIN_ASPECT, MAX_ASPECT);
+    let cw = vw;
+    let ch = vw / aspect;
+    if (ch > vh) { ch = vh; cw = vh * aspect; }
+
+    // Capping the device pixel ratio matters more than it looks: it only feeds
+    // the integer step below, and a 4x phone would otherwise pick a step that
+    // buys nothing visible through a nearest-neighbour upscale.
+    const dpr = clamp(window.devicePixelRatio || 1, 1, 3);
+    const dw = Math.max(1, Math.round(cw * dpr));
+    const dh = Math.max(1, Math.round(ch * dpr));
+
+    const at = (s) => ({
+      w: Math.max(2, Math.round(dw / s)),
+      h: Math.max(2, Math.round(dh / s)),
+    });
+
+    // Coarsen until the resolution is inside every bound; then, only if that
+    // left it narrower than the layouts can take, back off one step.
+    let step = Math.max(1, Math.round(dw / VIRT_W));
+    let r = at(step);
+    while (step < 24 && (r.w > MAX_W || r.h > MAX_H || r.w * r.h > MAX_PIXELS)) {
+      r = at(++step);
+    }
+    while (step > 1 && r.w < MIN_W && at(step - 1).w <= MAX_W) {
+      r = at(--step);
     }
 
-    this.scale = scale;
-    const w = Math.round(VIRT_W * scale);
-    const h = Math.round(VIRT_H * scale);
+    // A low-DPR screen can leave no whole number that lands in range at all —
+    // 400 device pixels across is either 400 game pixels (no pixel art left) or
+    // 200 (the longest string on the title screen no longer fits). Take the
+    // fractional step rather than break the layout: uneven pixel sizes are a
+    // blemish, text running off the edge is a bug.
+    if (r.w < MIN_W) {
+      step = dw / MIN_W;
+      r = { w: MIN_W, h: Math.max(2, Math.round(dh / step)) };
+    }
+
+    const changed = r.w !== this.width || r.h !== this.height;
+    this.width = r.w;
+    this.height = r.h;
+    this.pixelScale = step;
+    this.scale = cw / r.w;            // CSS pixels per game pixel
+
+    if (changed) {
+      for (const c of [this.sceneCanvas, this.uiCanvas]) {
+        c.width = r.w;
+        c.height = r.h;
+      }
+      // Assigning a backing-store size resets every 2D context flag, so the one
+      // that actually matters has to be reapplied here rather than once at setup.
+      this.ui.imageSmoothingEnabled = false;
+    }
+
+    const w = Math.round(cw);
+    const h = Math.round(ch);
+    // `position: fixed` is relative to the layout viewport; visualViewport's
+    // offsets say where the visible area currently sits inside it. Both are 0
+    // in the normal case and non-zero exactly when the user has pinch-zoomed or
+    // the on-screen keyboard has pushed the page up.
+    const ox = window.visualViewport?.offsetLeft ?? 0;
+    const oy = window.visualViewport?.offsetTop ?? 0;
     this.stage.style.width = `${w}px`;
     this.stage.style.height = `${h}px`;
+    this.stage.style.left = `${Math.round(ox + (vw - cw) / 2)}px`;
+    this.stage.style.top = `${Math.round(oy + (vh - ch) / 2)}px`;
     this.cssWidth = w;
     this.cssHeight = h;
 
@@ -79,8 +167,8 @@ export class Display {
   /** Map a client-space point (pointer event) into internal pixel space. */
   toVirtual(clientX, clientY, out = {}) {
     const r = this.stage.getBoundingClientRect();
-    out.x = ((clientX - r.left) / r.width) * VIRT_W;
-    out.y = ((clientY - r.top) / r.height) * VIRT_H;
+    out.x = ((clientX - r.left) / r.width) * this.width;
+    out.y = ((clientY - r.top) / r.height) * this.height;
     return out;
   }
 
@@ -88,5 +176,6 @@ export class Display {
     window.removeEventListener('resize', this._onResize);
     window.removeEventListener('orientationchange', this._onResize);
     window.visualViewport?.removeEventListener('resize', this._onResize);
+    window.visualViewport?.removeEventListener('scroll', this._onResize);
   }
 }

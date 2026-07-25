@@ -44,6 +44,9 @@ page.on('console', (m) => {
 page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}\n${e.stack ?? ''}`));
 
 await page.goto('http://localhost:5173/', { waitUntil: 'load' });
+// The module graph is still resolving when `load` fires, so anything reaching
+// into the game instance has to wait for it to exist.
+await page.waitForFunction(() => window.__game?._screen, null, { timeout: 20000 });
 
 if (args.track) {
   await page.evaluate((id) => window.__game?.loadTrack?.(id), args.track);
