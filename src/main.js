@@ -50,6 +50,7 @@ class Game {
     this.input = new Input(this.display);
     this.renderer = new PixelRenderer(
       this.display.sceneCanvas, this.display.width, this.display.height,
+      this.display.deviceWidth, this.display.deviceHeight,
     );
     this.ui = new UI(this.display);
     this.audio = new Audio();
@@ -65,7 +66,7 @@ class Game {
     // on rotation and every time a mobile URL bar slides in or out. Everything
     // that caches a size has to be told.
     this.display.onResize = (d) => {
-      this.renderer.resize(d.width, d.height);
+      this.renderer.resize(d.width, d.height, d.deviceWidth, d.deviceHeight);
       this.chaseCam.aspect = d.aspect;
       this.camera.aspect = d.aspect;
       this.camera.updateProjectionMatrix();

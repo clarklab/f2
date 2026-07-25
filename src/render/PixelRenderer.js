@@ -4,16 +4,36 @@ import { VIRT_W, VIRT_H } from '../core/Display.js';
 /**
  * PixelRenderer — the whole retro look, and most of the performance story.
  *
- * The scene is rendered into a 270x480 render target. That is 129,600 pixels;
- * a 1080x2400 phone screen is 2.6 million. Shading ~5% of the pixels a native
- * resolution renderer would is what buys a locked 60 fps with headroom to
- * spare, and it is also exactly what makes the image read as pixel art rather
- * than a smooth 3D scene with a filter over it.
+ * The scene is rendered into a render target of roughly 270x520. That is ~140k
+ * pixels; a 1080x2400 phone screen is 2.6 million. Shading ~5% of the pixels a
+ * native resolution renderer would is what buys a locked 60 fps with headroom
+ * to spare, and it is also exactly what makes the image read as pixel art
+ * rather than a smooth 3D scene with a filter over it.
  *
- * The target is then blitted 1:1 to a canvas whose backing store is also
- * 270x480, and the browser scales *that* up with nearest-neighbour filtering
- * via CSS. No expensive upscale pass, and every source pixel lands on an exact
- * square block of device pixels.
+ * THE UPSCALE happens here, in the blit, not in CSS. That is deliberate and it
+ * cost a bug to learn. Handing the browser a 271x525 WebGL drawing buffer and
+ * asking CSS to stretch it ~4x is unusual enough that Chrome for Android gets
+ * it wrong: it promotes the canvas to a hardware overlay and paints the scene
+ * into a fraction of the element, leaving a black band across the top of the
+ * screen. The 2D UI canvas, with identical CSS, composites correctly — which is
+ * what isolates WebGL-plus-tiny-buffer as the variable.
+ *
+ * So the canvas's drawing buffer now matches its CSS box 1:1 in device pixels
+ * and we do the nearest-neighbour magnification ourselves, in three passes:
+ *
+ *   1. scene  -> target       at internal resolution  (~140k px, all the work)
+ *   2. grade  -> gradeTarget  at internal resolution  (~140k px)
+ *   3. copy   -> canvas       at device resolution    (~2.6M px, one fetch)
+ *
+ * Splitting 2 from 3 is the point. Grading during magnification would run the
+ * sRGB curve, the saturation push, the quantiser and the dither at 2.6M pixels
+ * instead of 140k, for an image that has at most 140k distinct values in it.
+ * As it stands the only full-resolution work is a single NEAREST fetch where
+ * every 4x4 block of output pixels shares one texel — pure bandwidth, and about
+ * as cache-friendly as sampling gets.
+ *
+ * The dither also has to key off the *source* texel rather than gl_FragCoord —
+ * see the fragment shader.
  *
  * COLOUR SPACE — the subtle part. `renderer.outputColorSpace` is only applied
  * when drawing to the default framebuffer; when the destination is a render
@@ -43,6 +63,7 @@ uniform float uSaturation;
 uniform float uFlash;       // white/colour flash for impacts and boosts
 uniform vec3  uFlashColor;
 uniform float uFade;        // 0 = normal, 1 = black, for scene transitions
+uniform vec2  uTexSize;     // source resolution, for the dither lattice
 varying vec2 vUv;
 
 // Analytic Bayer. Bayer2 evaluates to [[0,2],[3,1]]/4 and the recursion builds
@@ -77,17 +98,44 @@ void main() {
 
   // Ordered-dither quantisation. The dither amplitude is exactly one
   // quantisation step, which is what turns a hard band edge into a stipple.
-  float d = (Bayer8(gl_FragCoord.xy) - 0.5) * uDither;
+  //
+  // The lattice is indexed by the *source* texel, not by gl_FragCoord. This
+  // pass runs at device resolution, so a screen-space lattice would put a full
+  // 8x8 Bayer cell inside every single source pixel — the stipple would shrink
+  // below the eye's resolving power and the whole 15-bit-framebuffer illusion
+  // would collapse into smooth gradients. Keyed to the texel, one dither cell
+  // spans 8 chunky pixels exactly as it did when the blit was 1:1.
+  float d = (Bayer8(floor(vUv * uTexSize)) - 0.5) * uDither;
   c = floor(clamp(c, 0.0, 1.0) * uLevels + 0.5 + d) / uLevels;
 
   gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }
 `;
 
+// The full-resolution pass. One texture fetch, nothing else. The grade has
+// already happened at low resolution, so magnification is pure bandwidth — and
+// a NEAREST fetch where 4x4 output pixels share one texel is about as friendly
+// as a texture cache ever gets.
+const COPY_FRAG = /* glsl */ `
+precision mediump float;
+uniform sampler2D tDiffuse;
+varying vec2 vUv;
+void main() {
+  gl_FragColor = vec4(texture2D(tDiffuse, vUv).rgb, 1.0);
+}
+`;
+
 export class PixelRenderer {
-  constructor(canvas, width = VIRT_W, height = VIRT_H) {
+  /**
+   * @param canvas         the scene canvas; this class owns its drawing buffer
+   * @param width,height   internal resolution — what the scene is shaded at
+   * @param outW,outH      output resolution — the canvas box in device pixels
+   */
+  constructor(canvas, width = VIRT_W, height = VIRT_H, outW = width, outH = height) {
     this._w = width;
     this._h = height;
+    this._outW = outW;
+    this._outH = outH;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: false,          // only affects the default framebuffer anyway,
@@ -106,8 +154,12 @@ export class PixelRenderer {
       // across the top of the screen that no amount of layout work removes.
       // One frame of latency is not worth that.
     });
-    this.renderer.setPixelRatio(1);        // never render above the internal res
-    this.renderer.setSize(width, height, false);
+    // The renderer's "size" is the *output* size — the default framebuffer it
+    // blits to. The scene never touches it; the scene is sized by the render
+    // target below. `false` leaves the canvas CSS alone: the stylesheet
+    // stretches the element to the stage and must keep doing so.
+    this.renderer.setPixelRatio(1);
+    this.renderer.setSize(outW, outH, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = false;
     this.renderer.info.autoReset = false;
@@ -126,6 +178,22 @@ export class PixelRenderer {
       samples: 0,
     });
 
+    // Holds the graded, quantised, dithered image at internal resolution. The
+    // grade runs here rather than in the magnification pass so its cost stays
+    // proportional to ~140k pixels instead of the device's ~2.6M. Already
+    // sRGB-encoded by the grade shader, so it is tagged linear to stop three.js
+    // applying the transfer curve a second time on sample.
+    this.gradeTarget = new THREE.WebGLRenderTarget(width, height, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      generateMipmaps: false,
+      depthBuffer: false,
+      stencilBuffer: false,
+      type: THREE.UnsignedByteType,
+      colorSpace: THREE.LinearSRGBColorSpace,
+      samples: 0,
+    });
+
     this.quadMaterial = new THREE.ShaderMaterial({
       uniforms: {
         tDiffuse: { value: this.target.texture },
@@ -135,9 +203,18 @@ export class PixelRenderer {
         uFlash: { value: 0.0 },
         uFlashColor: { value: new THREE.Color(1, 1, 1) },
         uFade: { value: 0.0 },
+        uTexSize: { value: new THREE.Vector2(width, height) },
       },
       vertexShader: QUAD_VERT,
       fragmentShader: QUAD_FRAG,
+      depthTest: false,
+      depthWrite: false,
+    });
+
+    this.copyMaterial = new THREE.ShaderMaterial({
+      uniforms: { tDiffuse: { value: this.gradeTarget.texture } },
+      vertexShader: QUAD_VERT,
+      fragmentShader: COPY_FRAG,
       depthTest: false,
       depthWrite: false,
     });
@@ -173,17 +250,23 @@ export class PixelRenderer {
   get height() { return this._h; }
 
   /**
-   * Move to a new internal resolution. The height follows the device aspect
-   * (see Display), so this runs on rotation and whenever the URL bar slides in
-   * or out. `setSize(..., false)` leaves the canvas CSS alone — the element is
-   * stretched to the stage by the stylesheet and must stay that way.
+   * Move to a new internal resolution and/or output size. The internal height
+   * follows the device aspect (see Display), so this runs on rotation and
+   * whenever a mobile URL bar slides in or out.
    */
-  resize(w, h) {
-    if (w === this._w && h === this._h) return;
-    this._w = w;
-    this._h = h;
-    this.renderer.setSize(w, h, false);
-    this.target.setSize(w, h);
+  resize(w, h, outW = w, outH = h) {
+    if (w !== this._w || h !== this._h) {
+      this._w = w;
+      this._h = h;
+      this.target.setSize(w, h);
+      this.gradeTarget.setSize(w, h);
+      this.quadMaterial.uniforms.uTexSize.value.set(w, h);
+    }
+    if (outW !== this._outW || outH !== this._outH) {
+      this._outW = outW;
+      this._outH = outH;
+      this.renderer.setSize(outW, outH, false);
+    }
   }
 
   /** Screen flash, 0..1, tinted. Used for impacts, boosts and transitions. */
@@ -207,8 +290,18 @@ export class PixelRenderer {
     if (this.contextLost) return;
     const r = this.renderer;
     r.info.reset();
+
+    // 1. the scene, at internal resolution
     r.setRenderTarget(this.target);
     r.render(scene, camera);
+
+    // 2. the retro grade, still at internal resolution
+    this.quad.material = this.quadMaterial;
+    r.setRenderTarget(this.gradeTarget);
+    r.render(this.postScene, this.postCamera);
+
+    // 3. magnify to the canvas at device resolution
+    this.quad.material = this.copyMaterial;
     r.setRenderTarget(null);
     r.render(this.postScene, this.postCamera);
   }
@@ -218,6 +311,8 @@ export class PixelRenderer {
 
   dispose() {
     this.target.dispose();
+    this.gradeTarget.dispose();
+    this.copyMaterial.dispose();
     this.quadMaterial.dispose();
     this.quad.geometry.dispose();
     this.renderer.dispose();

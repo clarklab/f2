@@ -131,11 +131,18 @@ export class Display {
     this.pixelScale = step;
     this.scale = cw / r.w;            // CSS pixels per game pixel
 
+    // Device-pixel size of the stage. The scene canvas takes this as its
+    // drawing buffer so the browser never has to scale it — see PixelRenderer,
+    // where handing Chrome for Android a tiny WebGL buffer to stretch turned
+    // out to paint the scene into a fraction of its own element.
+    this.deviceWidth = dw;
+    this.deviceHeight = dh;
+
     if (changed) {
-      for (const c of [this.sceneCanvas, this.uiCanvas]) {
-        c.width = r.w;
-        c.height = r.h;
-      }
+      // Only the UI canvas. The scene canvas's buffer belongs to the renderer,
+      // which sizes it to the device instead.
+      this.uiCanvas.width = r.w;
+      this.uiCanvas.height = r.h;
       // Assigning a backing-store size resets every 2D context flag, so the one
       // that actually matters has to be reapplied here rather than once at setup.
       this.ui.imageSmoothingEnabled = false;
