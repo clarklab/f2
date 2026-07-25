@@ -55,12 +55,27 @@ export class Input {
     this.leanRight = 0;
 
     // Menu/discrete actions.
+    //
+    // Edges are staged in `_pending*` by the event handlers and swapped into
+    // `justPressed`/`justReleased` exactly once per simulation step. This
+    // matters because the loop is fixed-timestep: `update()` can run several
+    // times for a single rendered frame, and clearing edges at render time
+    // meant one tap was seen by every step in that frame — which walked the
+    // player through two menu screens per tap.
     this.down = new Set();
     this.justPressed = new Set();
     this.justReleased = new Set();
+    this._pendingPressed = new Set();
+    this._pendingReleased = new Set();
+    this._pendingTap = null;
 
     this.lastDevice = 'keyboard';
     this.hasTouch = false;
+    // The driving control zones only exist while racing. On menus the whole
+    // screen has to be tappable — otherwise the bottom 42% is a dead region and
+    // anything laid out down there (the circuit picker's selector strip, the
+    // machine-select confirm panel) simply cannot be touched.
+    this.drivingControls = false;
     this.autoAccelerate = true;   // touch default; toggled in options
 
     this._keys = new Set();
@@ -118,12 +133,12 @@ export class Input {
   _press(a) {
     if (!this.down.has(a)) {
       this.down.add(a);
-      this.justPressed.add(a);
+      this._pendingPressed.add(a);
     }
   }
 
   _release(a) {
-    if (this.down.delete(a)) this.justReleased.add(a);
+    if (this.down.delete(a)) this._pendingReleased.add(a);
   }
 
   // -------------------------------------------------------------------
@@ -149,12 +164,11 @@ export class Input {
     const p = this.display.toVirtual(e.clientX, e.clientY);
     const L = this.layout;
 
-    // Anything above the control band counts as "confirm" — the whole viewport
-    // is a button on the menus.
-    if (p.y < L.padTop) {
+    // Outside a race, or above the control band during one, a press is a tap.
+    if (!this.drivingControls || p.y < L.padTop) {
       this._pointers.set(e.pointerId, { role: 'tap', ...p });
       this._press(Action.CONFIRM);
-      this._tapPoint = { x: p.x, y: p.y };
+      this._pendingTap = { x: p.x, y: p.y };
       return;
     }
 
@@ -247,9 +261,21 @@ export class Input {
   // Frame
   // -------------------------------------------------------------------
 
-  /** Call once per rendered frame, before the simulation steps. */
+  /** Call once per simulation step, before anything reads the input. */
   update(dt) {
+    // Gamepad first, so its edges land in the same batch as everything else
+    // rather than a step late.
     const pad = this._pollGamepad();
+
+    // Consume the edges staged since the previous step.
+    this.justPressed.clear();
+    this.justReleased.clear();
+    for (const a of this._pendingPressed) this.justPressed.add(a);
+    for (const a of this._pendingReleased) this.justReleased.add(a);
+    this._pendingPressed.clear();
+    this._pendingReleased.clear();
+    this._tapPoint = this._pendingTap;
+    this._pendingTap = null;
 
     // --- steering ---
     let kSteer = 0;
@@ -331,13 +357,6 @@ export class Input {
     this[key] = isDown;
   }
 
-  /** Call at the very end of the frame, after everything has read the edges. */
-  endFrame() {
-    this.justPressed.clear();
-    this.justReleased.clear();
-    this._tapPoint = null;
-  }
-
   pressed(action) { return this.justPressed.has(action); }
   held(action) { return this.down.has(action); }
 
@@ -347,6 +366,9 @@ export class Input {
   reset() {
     this._keys.clear();
     this.down.clear();
+    this._pendingPressed.clear();
+    this._pendingReleased.clear();
+    this._pendingTap = null;
     this._pointers.clear();
     this._touchSteer = 0;
     this._touchBrake = 0;

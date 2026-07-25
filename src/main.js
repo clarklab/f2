@@ -289,6 +289,8 @@ class Game {
   update(dt) {
     this.time += dt;
     this.ui.tick(dt);
+    // Driving zones exist only while a race is actually running.
+    this.input.drivingControls = this._screen === SCREEN.RACE;
     this.input.update(dt);
 
     switch (this._screen) {
@@ -596,7 +598,6 @@ class Game {
 
     this.renderer.setFlash(this.flash * 0.55, 0xffffff);
     this.renderer.setFade(this.fade);
-    this.input.endFrame();
   }
 
   _renderWorld(alpha, dt) {
