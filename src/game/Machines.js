@@ -59,7 +59,7 @@ export const MACHINES = [
     name: 'BLUE COMET',
     pilot: 'C. TALON',
     number: 111,
-    colors: { body: 0x2f6bff, accent: 0xe8f2ff, trim: 0xff3b6b, glow: 0x4fd8ff },
+    colors: { body: 0x2f6bff, accent: 0xe8f2ff, trim: 0xff3b6b, glow: 0x4fd8ff, glass: 0x7fe0ff },
     topSpeed: 126.9,
     weight: 1260,
     accelPeak: 52,
@@ -76,7 +76,7 @@ export const MACHINES = [
     name: 'AMBER LANCE',
     pilot: 'DR. VOSS',
     number: 3,
-    colors: { body: 0xf2b632, accent: 0x2a1a06, trim: 0xff6a2a, glow: 0xffd75e },
+    colors: { body: 0xffc746, accent: 0x2a1a06, trim: 0xff6a2a, glow: 0xffd75e, glass: 0xc0708a },
     topSpeed: 121.7,
     weight: 1020,
     accelPeak: 74,          // best acceleration in the field
@@ -93,7 +93,7 @@ export const MACHINES = [
     name: 'IRON SKUA',
     pilot: 'PICO',
     number: 24,
-    colors: { body: 0x3f8f5a, accent: 0x101c14, trim: 0xa8ff6a, glow: 0x8cff9c },
+    colors: { body: 0x4aa568, accent: 0x1a2a1e, trim: 0xd2dca4, glow: 0x8cff9c, glass: 0x9fd8b4 },
     topSpeed: 128.3,
     weight: 1620,
     accelPeak: 41,
@@ -110,7 +110,7 @@ export const MACHINES = [
     name: 'CRIMSON RAY',
     pilot: 'G. SABRE',
     number: 8,
-    colors: { body: 0xe23a5c, accent: 0xffd0d8, trim: 0x2a1020, glow: 0xff7a9c },
+    colors: { body: 0xe23a5c, accent: 0xffd0d8, trim: 0x8f1a3c, glow: 0xff7a9c, glass: 0xd98fd0 },
     topSpeed: 132.8,        // fastest in the field
     weight: 1960,
     accelPeak: 33,          // and the slowest to get there

@@ -134,6 +134,27 @@ how sprite-era art actually looked. The underglow is an additive quad with a
 dithered radial falloff — a smooth gradient there is the single clearest
 giveaway that a "pixel art" game is not really one.
 
+## The machines
+
+Four hulls, each assembled from one primitive: a box that tapers, shears and
+rotates. Between those it describes everything these craft are made of — nose
+cones and knife edges (`wFront`/`hFront`), booms that converge on the nose
+(`xFront`), canted winglets and swept leading-edge trim (`rx`/`ry`/`rz`).
+
+Two details do most of the work. Canopy glass gets a top face brighter than
+white; it clips at the blit, which is the blown-out glint the reference art for
+this genre paints in by hand, and it is the only thing that makes the canopy
+read as a different *material* rather than a different colour. And every
+exhaust is a dark cowl with a small bright nozzle protruding just past its back
+face — a flat panel of engine colour reads as a white block from behind, while
+a bright core inside a dark ring reads as a jet.
+
+The rest is silhouette discipline: converging booms and a spear nose on the
+balanced machine, a flat chisel on the light one, stepped shoulder armour and a
+roll bar on the heavy one, and a manta delta with the canopy sunk flush into
+the wing on the fast one. At racing distance a machine is about forty pixels
+across, so who is who has to be legible from the outline alone.
+
 ## The logo
 
 The V-ZERO wordmark is the one piece of art that is baked at build time rather
