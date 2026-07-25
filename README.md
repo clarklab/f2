@@ -98,11 +98,11 @@ one.
 
 ## How it renders
 
-The scene is drawn into a render target of roughly **270×520** and blitted 1:1
-to a canvas that CSS scales up with nearest-neighbour filtering. That is ~140k
-pixels against a modern phone's 2.6M, and shading 5% of the pixels is what buys
-the frame budget. It is also what makes the image read as pixel art: the
-chunkiness is real, not a post-process.
+The scene is drawn into a render target of roughly **270×520** and magnified to
+the canvas with nearest-neighbour filtering. That is ~140k pixels against a
+modern phone's 2.6M, and shading 5% of the pixels is what buys the frame budget.
+It is also what makes the image read as pixel art: the chunkiness is real, not a
+post-process.
 
 *Roughly*, because there is no one right resolution. 270 across is the authored
 width, but a fixed 270×480 is 9:16 and no phone on sale is 9:16 — pinning the
@@ -123,10 +123,36 @@ invisible. Camera FOVs are then corrected to hold the *horizontal* field fixed
 (`fitFov`), so the track is exactly as wide on screen as it was tuned to be and
 a taller phone spends its extra rows seeing further ahead.
 
-The blit does the retro grade in one pass — sRGB conversion, then
-5-bit-per-channel quantisation with an 8×8 ordered dither. The conversion has to
-come first: three.js writes render targets in the *linear* working space, so
-quantising the raw values would crowd every band into the shadows.
+Three passes get that to the screen:
+
+```
+1. scene  -> target       internal resolution   ~140k px, all the work
+2. grade  -> gradeTarget  internal resolution   ~140k px
+3. copy   -> canvas       device resolution     ~2.6M px, one texture fetch
+```
+
+The grade is sRGB conversion, then 5-bit-per-channel quantisation with an 8×8
+ordered dither. The conversion has to come first: three.js writes render targets
+in the *linear* working space, so quantising the raw values would crowd every
+band into the shadows.
+
+The magnification is ours rather than the browser's, and that is not a
+preference. Handing Chrome for Android a 271×525 WebGL drawing buffer and asking
+CSS to stretch it 4× is unusual enough that it gets it wrong — the canvas is
+promoted to a hardware overlay, the scene lands in a fraction of its own
+element, and a black band sits across the top of the screen. The 2D UI canvas,
+with byte-identical CSS, composites correctly, which is what isolates
+WebGL-plus-tiny-buffer as the cause. So the drawing buffer matches its CSS box
+1:1 and pass 3 does the upscale.
+
+Keeping pass 2 separate from pass 3 is what keeps that cheap. Grading during
+magnification would run the transfer curve, the saturation push, the quantiser
+and the dither at 2.6M pixels for an image containing at most 140k distinct
+values. Split, the only full-resolution work is a single NEAREST fetch where
+every 4×4 block of output pixels shares one texel. The dither also has to key
+off the *source* texel rather than `gl_FragCoord`, or an 8×8 Bayer cell would
+fit inside one chunky pixel and the whole 15-bit-framebuffer illusion would
+dissolve into smooth gradients.
 
 There are no lights in the scene at all. Machine hulls bake a fixed brightness
 per face direction into vertex colours, which is both free and much closer to
