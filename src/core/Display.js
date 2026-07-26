@@ -61,6 +61,11 @@ export class Display {
     this.scale = 1;
 
     this.ui = this.uiCanvas.getContext('2d', { alpha: true });
+    // The scene canvas is a plain 2D canvas too: the WebGL context lives on an
+    // offscreen canvas owned by PixelRenderer, which drawImage()s each finished
+    // frame in here. See PixelRenderer's header for why WebGL is never allowed
+    // to talk to the compositor directly.
+    this.present = this.sceneCanvas.getContext('2d', { alpha: false });
 
     this._onResize = this.resize.bind(this);
     window.addEventListener('resize', this._onResize, { passive: true });
@@ -82,8 +87,22 @@ export class Display {
    * match it, so the canvases fill the screen with no black surround.
    */
   resize() {
-    const vw = Math.max(1, window.visualViewport?.width ?? window.innerWidth);
-    const vh = Math.max(1, window.visualViewport?.height ?? window.innerHeight);
+    // Three different numbers claim to be "the height of the viewport" and on
+    // mobile they disagree, because the URL bar and the gesture bar overlay the
+    // page rather than shrinking it. Take the smallest: a stage larger than the
+    // screen pushes the HUD off the bottom edge, and there is no upside to
+    // guessing high.
+    const de = document.documentElement;
+    const vw = Math.max(1, Math.min(
+      window.visualViewport?.width ?? Infinity,
+      de?.clientWidth || Infinity,
+      window.innerWidth || Infinity,
+    ));
+    const vh = Math.max(1, Math.min(
+      window.visualViewport?.height ?? Infinity,
+      de?.clientHeight || Infinity,
+      window.innerHeight || Infinity,
+    ));
 
     // The tallest box the layouts tolerate that fits the viewport. When the
     // viewport is already inside the clamp this *is* the viewport, exactly.
@@ -131,21 +150,25 @@ export class Display {
     this.pixelScale = step;
     this.scale = cw / r.w;            // CSS pixels per game pixel
 
-    // Device-pixel size of the stage. The scene canvas takes this as its
-    // drawing buffer so the browser never has to scale it — see PixelRenderer,
-    // where handing Chrome for Android a tiny WebGL buffer to stretch turned
-    // out to paint the scene into a fraction of its own element.
+    // Device-pixel size of the stage. Nothing renders at this size any more —
+    // it is kept for the ?debug readout, where comparing it against the CSS box
+    // is what caught the URL-bar height disagreement.
     this.deviceWidth = dw;
     this.deviceHeight = dh;
 
     if (changed) {
-      // Only the UI canvas. The scene canvas's buffer belongs to the renderer,
-      // which sizes it to the device instead.
-      this.uiCanvas.width = r.w;
-      this.uiCanvas.height = r.h;
-      // Assigning a backing-store size resets every 2D context flag, so the one
-      // that actually matters has to be reapplied here rather than once at setup.
+      // Both canvases carry the internal resolution and are stretched by CSS.
+      // The scene canvas receives its pixels via drawImage from the offscreen
+      // WebGL canvas, so its backing store has to match what the renderer
+      // draws — PixelRenderer.resize() runs from the same onResize hook.
+      for (const c of [this.sceneCanvas, this.uiCanvas]) {
+        c.width = r.w;
+        c.height = r.h;
+      }
+      // Assigning a backing-store size resets every 2D context flag, so the
+      // ones that matter have to be reapplied here rather than once at setup.
       this.ui.imageSmoothingEnabled = false;
+      this.present.imageSmoothingEnabled = false;
     }
 
     const w = Math.round(cw);

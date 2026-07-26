@@ -57,7 +57,10 @@ body {
   width: 100%;
   height: 100%;
   display: block;
-  /* The whole aesthetic depends on this: no smoothing on upscale. */
+  /* Both canvases are plain 2D canvases holding the internal resolution, and
+     the browser magnifies them. The whole aesthetic depends on this hint: no
+     smoothing on the upscale. (The WebGL canvas is offscreen and never styled —
+     see PixelRenderer for why it is kept away from the compositor.) */
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }

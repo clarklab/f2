@@ -49,8 +49,7 @@ class Game {
     this.display = new Display();
     this.input = new Input(this.display);
     this.renderer = new PixelRenderer(
-      this.display.sceneCanvas, this.display.width, this.display.height,
-      this.display.deviceWidth, this.display.deviceHeight,
+      this.display.present, this.display.width, this.display.height,
     );
     this.ui = new UI(this.display);
     this.audio = new Audio();
@@ -66,7 +65,7 @@ class Game {
     // on rotation and every time a mobile URL bar slides in or out. Everything
     // that caches a size has to be told.
     this.display.onResize = (d) => {
-      this.renderer.resize(d.width, d.height, d.deviceWidth, d.deviceHeight);
+      this.renderer.resize(d.width, d.height);
       this.chaseCam.aspect = d.aspect;
       this.camera.aspect = d.aspect;
       this.camera.updateProjectionMatrix();
@@ -80,6 +79,7 @@ class Game {
     this.time = 0;
     this.fade = 0;
     this.flash = 0;
+    this.flashColor = 0xffffff;
     this.banner = null;
     this.debug = false;
 
@@ -334,6 +334,7 @@ class Game {
     }
 
     this.flash = Math.max(0, this.flash - dt * 3.2);
+    if (this.flash === 0) this.flashColor = 0xffffff;   // tint only outlives its own flash
     if (this.banner) {
       this.banner.t -= dt;
       if (this.banner.t <= 0) this.banner = null;
@@ -513,6 +514,15 @@ class Game {
           break;
         }
         case 'boost': this.audio.boost(); this.flash = 0.35; break;
+        case 'dash':
+          // A dash plate is a free hit of boost and has to feel like one:
+          // audio sting, a flash tinted to the machine's own glow colour, and
+          // a camera kick. The renderer flash colour is set per-frame below.
+          this.audio.boost();
+          this.flash = Math.max(this.flash, 0.45);
+          this.flashColor = machineById(this.machineId).colors.glow;
+          this.chaseCam.addShake(0.25);
+          break;
         case 'jump': this.audio.jump(); break;
         case 'impact':
           this.audio.impact(ev.force);
@@ -619,7 +629,7 @@ class Game {
     this.ui.clear();
     this._drawScreen();
 
-    this.renderer.setFlash(this.flash * 0.55, 0xffffff);
+    this.renderer.setFlash(this.flash * 0.55, this.flashColor);
     this.renderer.setFade(this.fade);
   }
 
@@ -641,7 +651,9 @@ class Game {
       this._camTarget.forward.copy(p.heading);
       this._camTarget.up.copy(p.up);
       this._camTarget.speed01 = p.speed01;
-      this._camTarget.boosting = p.boosting;
+      // A dash-plate surge gets the boost camera too — the pull-back and FOV
+      // kick are half of what makes "shot forward" legible at this resolution.
+      this._camTarget.boosting = p.boosting || p.dashBonus > p.params.topSpeed * 0.1;
       this.chaseCam.update(this._camTarget, dt);
       this.trackMesh.update(p.s, this.theme.fogFar);
     } else {
@@ -756,3 +768,86 @@ class Game {
 const game = new Game();
 window.__game = game;
 window.__THREE = THREE;
+
+/**
+ * `?debug` — an on-screen geometry readout, as plain DOM.
+ *
+ * It exists because a rendering fault that only appears on one physical device
+ * cannot be diagnosed from a screenshot: measuring UI anchors in a photo of a
+ * screen gives numbers with enough error to support several contradictory
+ * theories, which is exactly what happened. This prints what the device
+ * actually believes, so there is nothing left to infer.
+ *
+ * Deliberately not drawn on either canvas. The canvases are the thing under
+ * investigation; a readout rendered by a suspect is not evidence.
+ */
+/**
+ * `?noui` — hide the 2D overlay canvas entirely.
+ *
+ * The other half of the bisect. If the scene fills its element with the UI
+ * canvas gone, the fault is in having two stacked composited canvases rather
+ * than in the WebGL one; if it still bands, the UI canvas is irrelevant and the
+ * scene canvas is at fault on its own. Either answer removes a suspect.
+ */
+if (/[?&]noui\b/.test(location.search)) {
+  game.display.uiCanvas.style.display = 'none';
+}
+
+if (/[?&]debug\b/.test(location.search)) {
+  const el = document.createElement('div');
+  el.style.cssText = [
+    'position:fixed', 'left:0', 'top:0', 'right:0', 'z-index:99',
+    'background:rgba(0,0,0,0.86)', 'color:#5cff9d', 'padding:6px 8px',
+    'font:11px/1.35 ui-monospace,Menlo,Consolas,monospace',
+    'white-space:pre', 'pointer-events:none', 'overflow-x:auto',
+  ].join(';');
+  document.body.appendChild(el);
+
+  game.renderer.diagnose = true;
+
+  const rect = (node) => {
+    const r = node.getBoundingClientRect();
+    return `${r.left.toFixed(0)},${r.top.toFixed(0)} ${r.width.toFixed(0)}x${r.height.toFixed(0)}`;
+  };
+
+  // Rows of black from the top of a 2D canvas's centre column. Same probe the
+  // renderer runs on its GL stages; together the four numbers name the exact
+  // stage where a black band is born, on the device that has it.
+  const blackTop2d = (ctx) => {
+    const { width: w, height: h } = ctx.canvas;
+    try {
+      const px = ctx.getImageData(w >> 1, 0, 1, h).data;
+      let run = 0;
+      for (let y = 0; y < h; y++) {
+        const i = y * 4;
+        if (px[i] + px[i + 1] + px[i + 2] > 18 || px[i + 3] < 200) break;
+        run++;
+      }
+      return run;
+    } catch {
+      return -1;
+    }
+  };
+
+  setInterval(() => {
+    const d = game.display;
+    const p = game.renderer.probe();
+    const vv = window.visualViewport;
+    const de = document.documentElement;
+    el.textContent = [
+      `dpr ${devicePixelRatio}  inner ${innerWidth}x${innerHeight}  client ${de.clientWidth}x${de.clientHeight}`,
+      `visualViewport ${vv ? `${vv.width.toFixed(0)}x${vv.height.toFixed(0)} @${vv.offsetLeft.toFixed(0)},${vv.offsetTop.toFixed(0)}` : 'n/a'}`,
+      `stage  ${rect(d.stage)}`,
+      `scene  ${rect(d.sceneCanvas)}`,
+      `ui     ${rect(d.uiCanvas)}`,
+      `internal ${p.internal.join('x')}  step ${d.pixelScale}  device ${d.deviceWidth}x${d.deviceHeight}`,
+      `present.attr ${p.present.join('x')}  gl.attr ${p.glCanvas.join('x')}`,
+      `drawingBuffer ${p.drawingBuffer.join('x')}  glViewport [${p.glViewport}]  lost ${p.contextLost}`,
+      `blackTop rt=${game.renderer.diag?.rt ?? '?'} gl=${game.renderer.diag?.gl ?? '?'}` +
+        ` present=${blackTop2d(game.display.present)} ui=${blackTop2d(game.display.ui)}` +
+        ` of ${d.height} rows`,
+      `maxTex ${p.maxTexture}  maxViewport ${p.maxViewport.join('x')}`,
+      `fps ${game.loop.fps.toFixed(0)}  calls ${game.renderer.drawCalls}`,
+    ].join('\n');
+  }, 500);
+}

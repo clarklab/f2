@@ -123,36 +123,29 @@ invisible. Camera FOVs are then corrected to hold the *horizontal* field fixed
 (`fitFov`), so the track is exactly as wide on screen as it was tuned to be and
 a taller phone spends its extra rows seeing further ahead.
 
-Three passes get that to the screen:
+The retro grade — sRGB conversion, then 5-bit-per-channel quantisation with an
+8×8 ordered dither — happens in a second GL pass, still at internal resolution.
+The conversion has to come first: three.js writes render targets in the
+*linear* working space, so quantising the raw values would crowd every band
+into the shadows.
 
-```
-1. scene  -> target       internal resolution   ~140k px, all the work
-2. grade  -> gradeTarget  internal resolution   ~140k px
-3. copy   -> canvas       device resolution     ~2.6M px, one texture fetch
-```
+**The WebGL canvas is never in the document.** It renders offscreen, and each
+finished frame is copied with `drawImage()` into a plain 2D canvas, which is
+what the page actually shows. That indirection was bought with a real device
+bug: on at least one Pixel-class phone, Chrome composites a document WebGL
+canvas into only the bottom ~60% of its own element — with the element rect,
+the drawing buffer size and the GL viewport all reporting correct values, and a
+2D canvas under identical CSS compositing perfectly. It survived every indirect
+fix (buffer matched 1:1 to the box, `desynchronized` removed, `image-rendering`
+removed, buffer halved, the overlay canvas hidden). The one presentation path
+that provably works everywhere we have looked is the 2D canvas raster path, so
+it is the only one used: WebGL does all the rendering and never talks to the
+compositor. The copy is 1:1 at ~140k pixels and stays on the GPU.
 
-The grade is sRGB conversion, then 5-bit-per-channel quantisation with an 8×8
-ordered dither. The conversion has to come first: three.js writes render targets
-in the *linear* working space, so quantising the raw values would crowd every
-band into the shadows.
-
-The magnification is ours rather than the browser's, and that is not a
-preference. Handing Chrome for Android a 271×525 WebGL drawing buffer and asking
-CSS to stretch it 4× is unusual enough that it gets it wrong — the canvas is
-promoted to a hardware overlay, the scene lands in a fraction of its own
-element, and a black band sits across the top of the screen. The 2D UI canvas,
-with byte-identical CSS, composites correctly, which is what isolates
-WebGL-plus-tiny-buffer as the cause. So the drawing buffer matches its CSS box
-1:1 and pass 3 does the upscale.
-
-Keeping pass 2 separate from pass 3 is what keeps that cheap. Grading during
-magnification would run the transfer curve, the saturation push, the quantiser
-and the dither at 2.6M pixels for an image containing at most 140k distinct
-values. Split, the only full-resolution work is a single NEAREST fetch where
-every 4×4 block of output pixels shares one texel. The dither also has to key
-off the *source* texel rather than `gl_FragCoord`, or an 8×8 Bayer cell would
-fit inside one chunky pixel and the whole 15-bit-framebuffer illusion would
-dissolve into smooth gradients.
+Debug switches, kept because they earned it: `?debug` overlays the live
+geometry the device believes (element rects, buffer sizes, GL viewport), and
+`?noui` hides the HUD canvas — the bisect that finally proved the WebGL canvas
+was failing alone.
 
 There are no lights in the scene at all. Machine hulls bake a fixed brightness
 per face direction into vertex colours, which is both free and much closer to
