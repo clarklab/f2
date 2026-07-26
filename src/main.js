@@ -368,7 +368,9 @@ class Game {
         }
       }
     }
-    if (inp.pressed(Action.CONFIRM)) return this.menuIndex;
+    // Keyboard/gamepad only — a tap that missed every row raised CONFIRM at
+    // the input layer too, and it must not activate the highlighted row.
+    if (inp.pressed(Action.CONFIRM) && !tap) return this.menuIndex;
     return -1;
   }
 
@@ -396,11 +398,16 @@ class Game {
     if (inp.pressed(Action.LEFT)) moved = -1;
     if (inp.pressed(Action.RIGHT)) moved = 1;
 
-    // Tapping the left or right third of the model area cycles machines.
+    // Tapping the left or right side of the model area cycles machines. The
+    // bands are fractions of the live height — the resolution follows the
+    // device now, and the absolute coordinates this used to check stopped
+    // lining up with where anything is drawn.
+    const H = this.display.height;
     const tap = inp.tapPoint;
-    if (tap && tap.y > 80 && tap.y < 300) {
-      if (tap.x < this.display.width * 0.28) moved = -1;
-      else if (tap.x > this.display.width * 0.72) moved = 1;
+    const arrowTap = tap && tap.y > H * 0.12 && tap.y < H * 0.62;
+    if (arrowTap) {
+      if (tap.x < this.display.width * 0.32) moved = -1;
+      else if (tap.x > this.display.width * 0.68) moved = 1;
       else moved = 0;
     }
 
@@ -415,8 +422,13 @@ class Game {
     this.showcase.spin += dt * 0.7;
 
     if (inp.pressed(Action.BACK)) { this.audio.uiBack(); this.setScreen(SCREEN.MODE); return; }
-    const confirmTap = tap && tap.y >= 300;
-    if (inp.pressed(Action.CONFIRM) || confirmTap) {
+    // Every tap also raises the CONFIRM action at the input layer, so a bare
+    // pressed(CONFIRM) check fires on ARROW taps too and starts the race the
+    // moment anyone tries to browse machines. A tap only ever means what its
+    // location says; the CONFIRM edge counts only when there was no tap at
+    // all this frame (keyboard, gamepad).
+    const confirmTap = tap && !arrowTap && tap.y >= H * 0.62;
+    if ((inp.pressed(Action.CONFIRM) && !tap) || confirmTap) {
       this.audio.uiConfirm();
       if (this.pendingMode === 'gp') this.startGrandPrix();
       else this.setScreen(SCREEN.TRACK);
@@ -452,7 +464,9 @@ class Game {
     }
 
     if (inp.pressed(Action.BACK)) { this.audio.uiBack(); this.setScreen(SCREEN.MACHINE); return; }
-    if (inp.pressed(Action.CONFIRM)) {
+    // Keyboard/gamepad only: every tap raises CONFIRM too, and a stray tap
+    // that missed the circuit strip must not launch a race.
+    if (inp.pressed(Action.CONFIRM) && !tap) {
       this.audio.uiConfirm();
       this.startRace({ mode: this.pendingMode ?? 'race', trackId: TRACKS[this.trackIndex].id });
     }
