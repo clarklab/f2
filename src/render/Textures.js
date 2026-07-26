@@ -104,6 +104,12 @@ function mixHex(a, b, t) {
   ];
 }
 
+/** Blend two packed colours and pack the result back. */
+function mixHexOut(a, b, t) {
+  const [r, g, bl] = mixHex(a, b, t);
+  return (r << 16) | (g << 8) | bl;
+}
+
 // ---------------------------------------------------------------------------
 // Generators
 // ---------------------------------------------------------------------------
@@ -364,6 +370,179 @@ export function groundTexture({ size = 64, a = 0x2f7a3a, b = 0x1f5a2b, seed = 21
   }
   ctx.putImageData(img, 0, 0);
   const tex = toTexture(canvas);
+  cache.set(key, tex);
+  return tex;
+}
+
+/**
+ * A night facade: a dark wall with a scatter of lit windows.
+ *
+ * Two details do the work. Windows are lit in vertical *runs* rather than
+ * independently — real buildings light a stairwell or a whole floor of an
+ * office, and independent dice produce an even static that reads as noise
+ * instead of occupancy. And lit windows get a slightly brighter top row, which
+ * at this scale is enough to suggest a ceiling light rather than a flat panel.
+ */
+export function windowTexture({
+  size = 32, wall = 0x2a3350, lit = 0xffd98a, density = 0.45, seed = 3,
+} = {}) {
+  const key = `win:${size}:${wall}:${lit}:${density}:${seed}`;
+  if (cache.has(key)) return cache.get(key);
+  const { canvas, ctx } = makeCanvas(size, size);
+  const img = ctx.createImageData(size, size);
+  const buf = img.data;
+  const CELL = 4;               // 4px grid: 2px window, 2px mullion
+  const cells = size / CELL;
+  const put = (x, y, hex, mul = 1) => {
+    const i = (y * size + x) * 4;
+    buf[i] = ((hex >> 16) & 255) * mul;
+    buf[i + 1] = ((hex >> 8) & 255) * mul;
+    buf[i + 2] = (hex & 255) * mul;
+    buf[i + 3] = 255;
+  };
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const n = hash2D(x >> 2, y >> 2, seed + 7);
+      put(x, y, wall, 0.82 + n * 0.36);
+    }
+  }
+  // Vertical runs of lit windows.
+  for (let cx = 0; cx < cells; cx++) {
+    let y = 0;
+    while (y < cells) {
+      const on = hash2D(cx, y, seed) < density;
+      const run = 1 + Math.floor(hash2D(cx, y, seed + 3) * 4);
+      if (on) {
+        for (let k = 0; k < run && y + k < cells; k++) {
+          const cy = y + k;
+          const dim = 0.55 + hash2D(cx, cy, seed + 11) * 0.5;
+          for (let py = 0; py < 2; py++) {
+            for (let px = 0; px < 2; px++) {
+              put(cx * CELL + px + 1, cy * CELL + py + 1, lit, py === 0 ? dim : dim * 0.72);
+            }
+          }
+        }
+      }
+      y += run;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = toTexture(canvas);
+  cache.set(key, tex);
+  return tex;
+}
+
+/**
+ * Leaf-clump modulation for tree canopies.
+ *
+ * Deliberately near-neutral. This is used as a `map` on vertex-coloured props,
+ * and `map * vertexColor` means a *coloured* texture would fight the colour the
+ * geometry already carries — a green map over green vertices comes out black,
+ * which is exactly what a first attempt at this looked like. So the texture
+ * only supplies light and shade, and every hue in the scene comes from the
+ * vertex colours and the per-instance tint.
+ */
+export function foliageTexture({ size = 32, seed = 5, contrast = 0.42, base = 0 } = {}) {
+  const key = `foliage:${size}:${seed}:${contrast}`;
+  if (cache.has(key)) return cache.get(key);
+  const { canvas, ctx } = makeCanvas(size, size);
+  const img = ctx.createImageData(size, size);
+  const buf = img.data;
+  const lo = Math.round(255 * (1 - contrast));
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const n = fbm((x / size) * 7, (y / size) * 7, 7, 7, 3, seed);
+      const t = BAYER4[y & 3][x & 3];
+      const v = Math.floor((n + (t - 0.5) * 0.5) * 3) / 3;
+      const g = lo + Math.round((255 - lo) * Math.max(0, Math.min(1, v)));
+      const i = (y * size + x) * 4;
+      buf[i] = g; buf[i + 1] = g; buf[i + 2] = g; buf[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = toTexture(canvas);
+  cache.set(key, tex);
+  return tex;
+}
+
+/**
+ * Industrial plating: weld seams, rivets and corrosion blooms.
+ *
+ * Neutral for the same reason as the foliage above — it modulates the prop's
+ * own colour rather than replacing it. The corrosion is a *darkening* keyed off
+ * a second noise field so it clumps into patches instead of speckling.
+ */
+export function pipeTexture({ size = 32, seed = 4 } = {}) {
+  const key = `pipe:${size}:${seed}`;
+  if (cache.has(key)) return cache.get(key);
+  const { canvas, ctx } = makeCanvas(size, size);
+  const img = ctx.createImageData(size, size);
+  const buf = img.data;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const n = fbm((x / size) * 5, (y / size) * 5, 5, 5, 2, seed);
+      const t = BAYER4[y & 3][x & 3];
+      let v = 0.72 + Math.floor((n * 0.5 + (t - 0.5) * 0.4) * 4) / 4 * 0.36;
+      if (x % 8 === 0) v -= 0.26;                      // weld seam
+      if (x % 8 === 4 && y % 8 === 2) v += 0.2;        // rivet highlight
+      const rn = fbm((x / size) * 3 + 11, (y / size) * 3 + 5, 3, 3, 2, seed + 31);
+      if (rn > 0.66) v -= Math.min(0.3, (rn - 0.66) * 1.4);
+      const g = Math.round(255 * Math.max(0.24, Math.min(1.12, v)) / 1.12);
+      const i = (y * size + x) * 4;
+      buf[i] = g; buf[i + 1] = g; buf[i + 2] = g; buf[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = toTexture(canvas);
+  cache.set(key, tex);
+  return tex;
+}
+
+/**
+ * A sun: a hard-edged disc inside a banded halo.
+ *
+ * The disc edge is deliberately hard and the halo is quantised into rings. A
+ * smooth radial gradient is the single clearest way to break a pixel-art scene,
+ * and this is the largest object on the screen when it is visible.
+ */
+export function sunTexture({ size = 64, color = 0xffd070 } = {}) {
+  const key = `sun:${size}:${color}`;
+  if (cache.has(key)) return cache.get(key);
+  const { canvas, ctx } = makeCanvas(size, size);
+  const img = ctx.createImageData(size, size);
+  const buf = img.data;
+  const c = size / 2;
+  const core = mixHexOut(color, 0xffffff, 0.5);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = (x + 0.5 - c) / c, dy = (y + 0.5 - c) / c;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const t = BAYER4[y & 3][x & 3];
+      const i = (y * size + x) * 4;
+      if (d < 0.34) {
+        // Solid disc, banded from white-hot centre to the stated colour.
+        const k = Math.floor((d / 0.34) * 3) / 3;
+        const [r, g, b] = mixHex(core, color, k);
+        buf[i] = r; buf[i + 1] = g; buf[i + 2] = b; buf[i + 3] = 255;
+      } else if (d < 1.0) {
+        // Halo: quantised rings, dithered out to nothing at the rim.
+        const f = 1 - (d - 0.34) / 0.66;
+        const band = Math.floor(f * 5) / 5;
+        const a = band * band * 0.72;
+        const on = a > t * 0.9;
+        buf[i] = (color >> 16) & 255;
+        buf[i + 1] = (color >> 8) & 255;
+        buf[i + 2] = color & 255;
+        buf[i + 3] = on ? Math.round(a * 255) : 0;
+      } else {
+        buf[i + 3] = 0;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = toTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   cache.set(key, tex);
   return tex;
 }

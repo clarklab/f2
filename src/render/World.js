@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import { skyTexture, groundTexture, metalTexture, fbm } from './Textures.js';
-import { makeRng } from '../core/MathUtil.js';
-import { TrackFrame } from '../track/TrackPath.js';
+import { skyTexture, groundTexture } from './Textures.js';
+import { buildEnvironment, updateSun } from './Scenery.js';
 
 /**
  * World — everything that is not the track or the racers: sky, ground and
@@ -76,77 +75,20 @@ export class World {
   }
 
   /**
-   * Scenery is generated from the track itself so it always frames the road.
-   * Objects are placed just beyond the shoulder on both sides at deterministic
-   * intervals, then pushed outward by a seeded jitter.
+   * Hand the track to the environment builder for this theme. Each circuit gets
+   * its own set of prop models — see Scenery.js — rather than the same box
+   * field recoloured.
    */
   buildScenery(path) {
-    const kind = this.theme.scenery;
-    if (!kind) return;
-    const rng = makeRng(1337);
-    const frame = new TrackFrame();
-
-    const specs = {
-      towers: { count: 260, spacing: 11, near: 26, far: 190, minH: 30, maxH: 150, w: 14 },
-      spires: { count: 200, spacing: 15, near: 22, far: 220, minH: 12, maxH: 74, w: 11 },
-      pylons: { count: 190, spacing: 16, near: 18, far: 120, minH: 20, maxH: 60, w: 5 },
-      buoys: { count: 150, spacing: 22, near: 30, far: 180, minH: 5, maxH: 16, w: 7 },
-    };
-    const spec = specs[kind] ?? specs.spires;
-
-    const geo = new THREE.BoxGeometry(1, 1, 1);
-    // Pivot at the base so scaling grows upward from the ground.
-    geo.translate(0, 0.5, 0);
-    const tex = metalTexture({
-      base: shade(this.theme.ground?.color ?? 0x445566, 0.28),
-      dark: shade(this.theme.ground?.color ?? 0x223344, -0.42),
-      seed: 13,
-    });
-    const mat = new THREE.MeshBasicMaterial({ map: tex, fog: true });
-    this._disposables.push(geo, mat);
-
-    const mesh = new THREE.InstancedMesh(geo, mat, spec.count);
-    mesh.frustumCulled = false;
-    mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const pos = new THREE.Vector3();
-    const scl = new THREE.Vector3();
-    const up = new THREE.Vector3(0, 1, 0);
-    const baseY = this.groundY ?? 0;
-    let i = 0;
-
-    for (let k = 0; k < spec.count; k++) {
-      const s = (k * spec.spacing * 1.7) % path.length;
-      path.sampleAt(s, frame);
-      const side = rng() < 0.5 ? -1 : 1;
-      const lateral = spec.near + rng() * (spec.far - spec.near);
-      const d = (frame.width * 0.5 + lateral) * side;
-
-      // Place scenery on the horizontal plane rather than in the track's frame,
-      // so banked and elevated sections do not produce leaning buildings.
-      pos.set(
-        frame.pos.x + frame.side.x * d,
-        baseY,
-        frame.pos.z + frame.side.z * d,
-      );
-
-      const h = spec.minH + Math.pow(rng(), 1.6) * (spec.maxH - spec.minH);
-      const w = spec.w * (0.6 + rng() * 0.9);
-      scl.set(w, h, w * (0.7 + rng() * 0.6));
-      q.setFromAxisAngle(up, rng() * Math.PI);
-      m.compose(pos, q, scl);
-      mesh.setMatrixAt(i++, m);
-    }
-    mesh.count = i;
-    mesh.instanceMatrix.needsUpdate = true;
-    this.group.add(mesh);
-    this.scenery = mesh;
+    const env = buildEnvironment(this.theme.env ?? this.theme.scenery, path, this.group, this.groundY ?? 0);
+    this._disposables.push(...env.disposables);
+    this.sceneryMeshes = env.meshes;
+    this.sun = env.sun;
   }
 
-  /** Keep the sky and ground centred on the camera. */
+  /** Keep the sky, sun and ground centred on the camera. */
   update(camera) {
+    updateSun(this.sun, camera);
     if (this.sky) {
       this.sky.position.copy(camera.position);
       this.sky.updateMatrix();

@@ -18,13 +18,15 @@ import { loop, resolveZones } from './LoopBuilder.js';
 export const THEMES = {
   city: {
     name: 'MUTE CITY',
-    sky: [[0, 0x0b1030], [0.42, 0x2a3a7a], [0.7, 0x6a7ac0], [1, 0xc8b0d8]],
-    fog: 0x6a7ac0,
-    fogNear: 60,
-    fogFar: 580,
+    // Deep night. The gradient never reaches daylight at the top, because the
+    // brightest thing on this circuit should be the windows.
+    sky: [[0, 0x04060f], [0.4, 0x0b1230], [0.72, 0x1b2a5c], [1, 0x35407e]],
+    fog: 0x141c40,
+    fogNear: 70,
+    fogFar: 620,
     markerColor: 0xff6a92,
-    ground: { color: 0x171b34, y: -34 },
-    scenery: 'towers',
+    ground: { color: 0x0c0f1e, y: -34, gridLines: true },
+    env: 'city',
     track: {
       road: 0x9aa0ab, roadDark: 0x767c88, rung: 0x5c626e,
       stripe: 0xffffff, stripe2: 0x2a2f3d, shoulder: 0x0d0f18,
@@ -33,13 +35,15 @@ export const THEMES = {
   },
   ocean: {
     name: 'BIG BLUE',
-    sky: [[0, 0x071a3a], [0.4, 0x1e64b4], [0.72, 0x63b8e8], [1, 0xcfeaff]],
-    fog: 0x63b8e8,
-    fogNear: 70,
-    fogFar: 620,
-    markerColor: 0xffb03a,
-    ground: { color: 0x2b57b8, y: -26, wave: true },
-    scenery: 'buoys',
+    // Low sun: the sky is warm at the horizon and cools upward, so the sun
+    // billboard sits in colour that belongs to it.
+    sky: [[0, 0x10214e], [0.34, 0x2f6aa8], [0.62, 0xf0a058], [1, 0xffd9a0]],
+    fog: 0xe8a878,
+    fogNear: 80,
+    fogFar: 680,
+    markerColor: 0xff8a3a,
+    ground: { color: 0xd8b078, y: -11 },
+    env: 'ocean',
     track: {
       road: 0xa8aec4, roadDark: 0x848aa4, rung: 0x666c88,
       stripe: 0xfff4d0, stripe2: 0x2a2038, shoulder: 0x120c22,
@@ -50,11 +54,11 @@ export const THEMES = {
     name: 'SAND OCEAN',
     sky: [[0, 0x2a1436], [0.36, 0x8a3a52], [0.66, 0xdc8a5a], [1, 0xf6d9a0]],
     fog: 0xdc8a5a,
-    fogNear: 55,
-    fogFar: 540,
+    fogNear: 60,
+    fogFar: 620,
     markerColor: 0x6ad8ff,
-    ground: { color: 0xa8763f, y: -20, dunes: true },
-    scenery: 'spires',
+    ground: { color: 0xb98a52, y: -22, dunes: true },
+    env: 'desert',
     track: {
       road: 0x9c9184, roadDark: 0x7a7166, rung: 0x5e564d,
       stripe: 0xffe9b0, stripe2: 0x2c2118, shoulder: 0x140f0a,
@@ -63,13 +67,15 @@ export const THEMES = {
   },
   grid: {
     name: 'SILENCE',
-    sky: [[0, 0x05060f], [0.45, 0x0d1430], [0.75, 0x1c2d5a], [1, 0x38507e]],
-    fog: 0x1c2d5a,
-    fogNear: 50,
-    fogFar: 510,
+    // Cold vacuum blue. A space port reads as industrial only if the light is
+    // colourless, so nothing here is warm except the hazard paint on the pipes.
+    sky: [[0, 0x060c18], [0.42, 0x122234], [0.74, 0x27455a], [1, 0x437084]],
+    fog: 0x1e3648,
+    fogNear: 60,
+    fogFar: 560,
     markerColor: 0x7dff9c,
-    ground: { color: 0x0a0d18, y: -40, gridLines: true },
-    scenery: 'pylons',
+    ground: { color: 0x2a2f38, y: -15, gridLines: true },
+    env: 'grid',
     track: {
       road: 0x8790a0, roadDark: 0x646c7e, rung: 0x474e5e,
       stripe: 0x9dffb8, stripe2: 0x12261c, shoulder: 0x07110c,
@@ -78,13 +84,14 @@ export const THEMES = {
   },
   wind: {
     name: 'DEATH WIND',
-    sky: [[0, 0x1a1020], [0.4, 0x4a3050], [0.7, 0x9a7a82], [1, 0xd8c2b0]],
-    fog: 0x9a7a82,
-    fogNear: 45,
-    fogFar: 460,
+    // Overcast forest: a pale sky so the canopy silhouettes read against it.
+    sky: [[0, 0x243044], [0.4, 0x4c6072], [0.72, 0x8ca0a4], [1, 0xc8d4c4]],
+    fog: 0x8ca0a4,
+    fogNear: 55,
+    fogFar: 500,
     markerColor: 0xffe14d,
-    ground: { color: 0x4a3f46, y: -30 },
-    scenery: 'spires',
+    ground: { color: 0x2c4a2c, y: -11 },
+    env: 'wind',
     track: {
       road: 0x93989e, roadDark: 0x70757c, rung: 0x53585f,
       stripe: 0xffe14d, stripe2: 0x2b2418, shoulder: 0x110e0c,
@@ -95,11 +102,11 @@ export const THEMES = {
     name: 'FIRE FIELD',
     sky: [[0, 0x1c0408], [0.34, 0x6e1010], [0.62, 0xc4401a], [1, 0xf5a83c]],
     fog: 0xc4401a,
-    fogNear: 45,
-    fogFar: 490,
+    fogNear: 50,
+    fogFar: 520,
     markerColor: 0x66f0ff,
-    ground: { color: 0x8a1e10, y: -28, lava: true },
-    scenery: 'spires',
+    ground: { color: 0x5a2018, y: -22, lava: true },
+    env: 'fire',
     track: {
       road: 0x8b8078, roadDark: 0x69605a, rung: 0x4c4540,
       stripe: 0xffd06a, stripe2: 0x2a1008, shoulder: 0x150604,

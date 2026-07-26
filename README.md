@@ -153,6 +153,35 @@ how sprite-era art actually looked. The underglow is an additive quad with a
 dithered radial falloff — a smooth gradient there is the single clearest
 giveaway that a "pixel art" game is not really one.
 
+## The environments
+
+Every circuit gets a hand-built world rather than the same box field recoloured:
+a night city of lit towers, a sunset beach with palms and a dithered sun, a
+conifer forest, an orbital pipe yard, an eroded desert of layered mesas, and a
+volcanic basalt plain.
+
+They are real models — `Scenery.js` has a small prop toolkit (tapering boxes,
+tubes along arbitrary axes, cones, crossed billboards) that builds a palm's
+drooping fronds, a mesa's strata as separate blocks, a lattice mast, a knot of
+twisted pipes. Layers are placed from the track itself, so scenery always frames
+the road however a circuit was authored, and dropped onto the ground plane
+rather than into the track's frame — otherwise a banked corner produces leaning
+trees. A few props straddle the road instead: sign gantries in the city, pipe
+bridges at the port.
+
+The budget is what shapes it. Each layer is one `InstancedMesh`, so 240 trees
+cost one draw call, and per-instance colour supplies the variety that would
+otherwise need separate meshes — a single conifer model yields a forest of
+different greens. Six environments run at 26–32 draw calls and 32–78k triangles.
+
+Two things had to be learned the hard way. Face brightness is baked into vertex
+colours exactly as the machines do it, because there are no lights in this game.
+And prop textures are *neutral* — `map * vertexColor` means a green leaf texture
+over green vertices comes out black, which is precisely what the first attempt
+looked like, so the maps carry only light and shade and every hue comes from the
+geometry and the instance tint. The one exception is the city, where the window
+texture deliberately *is* the wall colour, and the instance tint paints it.
+
 ## The machines
 
 Four hulls, each assembled from one primitive: a box that tapers, shears and
@@ -204,7 +233,7 @@ src/
   core/      display, fixed-timestep loop, input, save, math
   track/     spline + frames, loop authoring DSL, mesh builder, surfaces
   game/      vehicle physics, machines, AI driver, race director, camera
-  render/    low-res pipeline, procedural textures, machine models, world
+  render/    low-res pipeline, procedural textures, machine models, world, scenery
   audio/     synthesis, sequencer, songs
   ui/        bitmap font, screens, HUD, minimap
 tests/       geometry, physics and race-rule tests
