@@ -79,6 +79,7 @@ class Game {
     this.time = 0;
     this.fade = 0;
     this.flash = 0;
+    this.flashColor = 0xffffff;
     this.banner = null;
     this.debug = false;
 
@@ -333,6 +334,7 @@ class Game {
     }
 
     this.flash = Math.max(0, this.flash - dt * 3.2);
+    if (this.flash === 0) this.flashColor = 0xffffff;   // tint only outlives its own flash
     if (this.banner) {
       this.banner.t -= dt;
       if (this.banner.t <= 0) this.banner = null;
@@ -512,6 +514,15 @@ class Game {
           break;
         }
         case 'boost': this.audio.boost(); this.flash = 0.35; break;
+        case 'dash':
+          // A dash plate is a free hit of boost and has to feel like one:
+          // audio sting, a flash tinted to the machine's own glow colour, and
+          // a camera kick. The renderer flash colour is set per-frame below.
+          this.audio.boost();
+          this.flash = Math.max(this.flash, 0.45);
+          this.flashColor = machineById(this.machineId).colors.glow;
+          this.chaseCam.addShake(0.25);
+          break;
         case 'jump': this.audio.jump(); break;
         case 'impact':
           this.audio.impact(ev.force);
@@ -618,7 +629,7 @@ class Game {
     this.ui.clear();
     this._drawScreen();
 
-    this.renderer.setFlash(this.flash * 0.55, 0xffffff);
+    this.renderer.setFlash(this.flash * 0.55, this.flashColor);
     this.renderer.setFade(this.fade);
   }
 
@@ -640,7 +651,9 @@ class Game {
       this._camTarget.forward.copy(p.heading);
       this._camTarget.up.copy(p.up);
       this._camTarget.speed01 = p.speed01;
-      this._camTarget.boosting = p.boosting;
+      // A dash-plate surge gets the boost camera too — the pull-back and FOV
+      // kick are half of what makes "shot forward" legible at this resolution.
+      this._camTarget.boosting = p.boosting || p.dashBonus > p.params.topSpeed * 0.1;
       this.chaseCam.update(this._camTarget, dt);
       this.trackMesh.update(p.s, this.theme.fogFar);
     } else {
@@ -790,9 +803,30 @@ if (/[?&]debug\b/.test(location.search)) {
   ].join(';');
   document.body.appendChild(el);
 
+  game.renderer.diagnose = true;
+
   const rect = (node) => {
     const r = node.getBoundingClientRect();
     return `${r.left.toFixed(0)},${r.top.toFixed(0)} ${r.width.toFixed(0)}x${r.height.toFixed(0)}`;
+  };
+
+  // Rows of black from the top of a 2D canvas's centre column. Same probe the
+  // renderer runs on its GL stages; together the four numbers name the exact
+  // stage where a black band is born, on the device that has it.
+  const blackTop2d = (ctx) => {
+    const { width: w, height: h } = ctx.canvas;
+    try {
+      const px = ctx.getImageData(w >> 1, 0, 1, h).data;
+      let run = 0;
+      for (let y = 0; y < h; y++) {
+        const i = y * 4;
+        if (px[i] + px[i + 1] + px[i + 2] > 18 || px[i + 3] < 200) break;
+        run++;
+      }
+      return run;
+    } catch {
+      return -1;
+    }
   };
 
   setInterval(() => {
@@ -809,6 +843,9 @@ if (/[?&]debug\b/.test(location.search)) {
       `internal ${p.internal.join('x')}  step ${d.pixelScale}  device ${d.deviceWidth}x${d.deviceHeight}`,
       `present.attr ${p.present.join('x')}  gl.attr ${p.glCanvas.join('x')}`,
       `drawingBuffer ${p.drawingBuffer.join('x')}  glViewport [${p.glViewport}]  lost ${p.contextLost}`,
+      `blackTop rt=${game.renderer.diag?.rt ?? '?'} gl=${game.renderer.diag?.gl ?? '?'}` +
+        ` present=${blackTop2d(game.display.present)} ui=${blackTop2d(game.display.ui)}` +
+        ` of ${d.height} rows`,
       `maxTex ${p.maxTexture}  maxViewport ${p.maxViewport.join('x')}`,
       `fps ${game.loop.fps.toFixed(0)}  calls ${game.renderer.drawCalls}`,
     ].join('\n');

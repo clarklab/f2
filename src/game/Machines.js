@@ -43,7 +43,7 @@ const BASE = {
   slideRate: 15.0,     // m/s^2 lateral strafe from the lean buttons
   slideCost: 0.055,    // fraction of speed shed per second while leaning
   brake: 48,
-  drag: 0.00022,       // quadratic; ~3.9 m/s^2 at top speed, below every machine's accel tail
+  drag: 0.00022,       // quadratic; ~4.9 m/s^2 at top speed, below every machine's accel tail
   rollingDrag: 0.5,    // linear
   dirtDecel: 26,       // rough ground
   offTrackDecel: 34,   // beyond the rails entirely
@@ -60,9 +60,9 @@ export const MACHINES = [
     pilot: 'C. TALON',
     number: 111,
     colors: { body: 0x2f6bff, accent: 0xe8f2ff, trim: 0xff3b6b, glow: 0x4fd8ff, glass: 0x7fe0ff },
-    topSpeed: 126.9,
+    topSpeed: 146,
     weight: 1260,
-    accelPeak: 52,
+    accelPeak: 58,
     accelTail: 0.11,
     slipSpeedFactor: 0.72,
     gripRate: 3.6,
@@ -77,9 +77,9 @@ export const MACHINES = [
     pilot: 'DR. VOSS',
     number: 3,
     colors: { body: 0xffc746, accent: 0x2a1a06, trim: 0xff6a2a, glow: 0xffd75e, glass: 0xc0708a },
-    topSpeed: 121.7,
+    topSpeed: 140,
     weight: 1020,
-    accelPeak: 74,          // best acceleration in the field
+    accelPeak: 82,          // best acceleration in the field
     accelTail: 0.09,
     slipSpeedFactor: 0.63,  // and the earliest to let go
     gripRate: 2.9,
@@ -94,9 +94,9 @@ export const MACHINES = [
     pilot: 'PICO',
     number: 24,
     colors: { body: 0x4aa568, accent: 0x1a2a1e, trim: 0xd2dca4, glow: 0x8cff9c, glass: 0x9fd8b4 },
-    topSpeed: 128.3,
+    topSpeed: 147.5,
     weight: 1620,
-    accelPeak: 41,
+    accelPeak: 46,
     accelTail: 0.14,
     slipSpeedFactor: 0.75,
     gripRate: 3.9,
@@ -111,9 +111,9 @@ export const MACHINES = [
     pilot: 'G. SABRE',
     number: 8,
     colors: { body: 0xe23a5c, accent: 0xffd0d8, trim: 0x8f1a3c, glow: 0xff7a9c, glass: 0xd98fd0 },
-    topSpeed: 132.8,        // fastest in the field
+    topSpeed: 152.8,        // fastest in the field
     weight: 1960,
-    accelPeak: 33,          // and the slowest to get there
+    accelPeak: 40,          // and the slowest to get there
     accelTail: 0.16,
     slipSpeedFactor: 0.82,  // best grip: holds on far longer than anything else
     gripRate: 4.3,
@@ -164,7 +164,7 @@ export const ENERGY = {
 export const BOOST = {
   duration: 3.8,
   maxCharges: 3,
-  accel: 130,               // m/s^2 while below the sawtooth target
+  accel: 150,               // m/s^2 while below the sawtooth target
   // Speed decays from the peak back to top speed, then re-spikes. It is what
   // makes a boost feel like a series of kicks instead of a smooth ramp.
   sawtoothDecay: 0.34,

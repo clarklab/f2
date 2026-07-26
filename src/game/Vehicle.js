@@ -92,7 +92,7 @@ export class Vehicle {
     // Per-frame event flags, consumed and cleared by the renderer/audio.
     this.events = {
       impact: 0, mine: false, boostFired: false, jump: false,
-      land: 0, scrape: 0,
+      land: 0, scrape: 0, dash: false,
     };
   }
 
@@ -252,10 +252,15 @@ export class Vehicle {
     // A dash plate lifts the ceiling past top speed, then it bleeds away. The
     // overspeed is deliberately short-lived: it should be a kick down a
     // straight, not a state you carry into the next corner.
-    if (this.surface === SURFACE.BOOST) {
+    const onDash = this.surface === SURFACE.BOOST;
+    if (onDash) {
       this.dashBonus = Math.max(this.dashBonus, p.topSpeed * 0.42);
       this.speed = Math.min(this.speed + 150 * dt, p.topSpeed + this.dashBonus);
+      // Edge-triggered so the flash and the audio fire once per plate rather
+      // than once per tick — the same discipline as the jump plates.
+      if (!this._onDash) this.events.dash = true;
     }
+    this._onDash = onDash;
     this.dashBonus = Math.max(0, this.dashBonus - p.topSpeed * 0.5 * dt);
 
     this.speed = clamp(this.speed, -14, Math.max(cap, p.boostPeak));
@@ -476,6 +481,6 @@ export class Vehicle {
   clearEvents() {
     const e = this.events;
     e.impact = 0; e.mine = false; e.boostFired = false;
-    e.jump = false; e.land = 0; e.scrape = 0;
+    e.jump = false; e.land = 0; e.scrape = 0; e.dash = false;
   }
 }

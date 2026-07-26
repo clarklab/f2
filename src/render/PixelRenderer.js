@@ -51,7 +51,11 @@ void main() {
 `;
 
 const QUAD_FRAG = /* glsl */ `
-precision mediump float;
+// highp on purpose. mediump resolves to fp16 on most mobile GPUs, and this
+// shader does texel arithmetic (vUv * uTexSize) where fp16's ~0.001 resolution
+// is the same order as a texel — the kind of thing that renders fine on a
+// desktop and misbehaves only on the one phone you cannot reproduce on.
+precision highp float;
 
 uniform sampler2D tDiffuse;
 uniform float uLevels;      // quantisation steps per channel
@@ -170,15 +174,21 @@ export class PixelRenderer {
       depthWrite: false,
     });
 
-    // A single oversized triangle rather than a quad: one fewer vertex, no
-    // diagonal seam, and the GPU clips the overhang for free.
+    // An exact two-triangle quad over [-1,1]. The usual trick here is a single
+    // oversized triangle with vertices at NDC 3 and the overhang clipped, which
+    // saves one triangle — but it also hands the driver's clipper a shape no
+    // ordinary content produces, and this project has already met one phone
+    // whose rendering of this pass cannot be explained from spec-conformant
+    // behaviour. A quad that needs no clipping at all is one less thing a
+    // driver can get creative with, for a cost of one triangle per frame.
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
-      -1, -1, 0, 3, -1, 0, -1, 3, 0,
+      -1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0,
     ]), 3));
     geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([
-      0, 0, 2, 0, 0, 2,
+      0, 0, 1, 0, 1, 1, 0, 1,
     ]), 2));
+    geo.setIndex([0, 1, 2, 0, 2, 3]);
     this.quad = new THREE.Mesh(geo, this.quadMaterial);
     this.quad.frustumCulled = false;
     this.postScene = new THREE.Scene();
@@ -241,13 +251,50 @@ export class PixelRenderer {
     r.setRenderTarget(this.target);
     r.render(scene, camera);
 
+    if (this.diagnose) this._probeStage('rt');
+
     // 2. the retro grade, into the offscreen canvas's default framebuffer
     r.setRenderTarget(null);
     r.render(this.postScene, this.postCamera);
 
+    if (this.diagnose) this._probeStage('gl');
+
     // 3. hand the finished frame to the on-page 2D canvas, 1:1. This is the
     // whole trick: the only canvas the compositor ever sees is a plain 2D one.
     this.presentCtx.drawImage(this.glCanvas, 0, 0);
+  }
+
+  /**
+   * Black-band probe: read a one-pixel-wide centre column out of a pipeline
+   * stage and count how many rows from the top of the image are black. Run at
+   * each stage, this pins the corruption to the pass that introduces it — on
+   * the device that has it, which no amount of local testing can substitute
+   * for. Costs a pipeline stall, so it is throttled and only runs on ?debug.
+   */
+  _probeStage(which) {
+    this._diagTick = (this._diagTick ?? 0) + 1;
+    if (this._diagTick % 40 !== 0 && this.diag?.[which] !== undefined) return;
+    const h = this._h;
+    const x = this._w >> 1;
+    if (!this._diagBuf || this._diagBuf.length < h * 4) {
+      this._diagBuf = new Uint8Array(h * 4);
+    }
+    const buf = this._diagBuf;
+    if (which === 'rt') {
+      this.renderer.readRenderTargetPixels(this.target, x, 0, 1, h, buf);
+    } else {
+      const gl = this.renderer.getContext();
+      gl.readPixels(x, 0, 1, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    }
+    // GL rows run bottom-up; the top of the image is the end of the buffer.
+    let run = 0;
+    for (let yy = h - 1; yy >= 0; yy--) {
+      const i = yy * 4;
+      if (buf[i] + buf[i + 1] + buf[i + 2] > 18) break;
+      run++;
+    }
+    this.diag = this.diag ?? {};
+    this.diag[which] = run;
   }
 
   /**

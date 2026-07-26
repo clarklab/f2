@@ -387,7 +387,12 @@ export class MachineView {
     this.hull.position.y = bob;
 
     const throttle = v.speed01;
-    const boosting = v.boosting;
+    // A dash-plate surge lights the machine up exactly like a manual boost.
+    // dashBonus decays over ~a second, so the glow fades out with the speed
+    // instead of snapping off at the plate's edge.
+    const surge = Math.min(1, v.dashBonus / (v.params.topSpeed * 0.25));
+    const boosting = v.boosting || surge > 0.6;
+    const hot = Math.max(v.boosting ? 1 : 0, surge);
 
     const ride = Math.max(0.2, v.h);
     // Sit the pool of light on the road rather than under the hull, so it reads
@@ -398,12 +403,15 @@ export class MachineView {
     const lift = Math.max(0, ride - v.params.rideHeight);
     const spread = 1 + lift * 0.22;
     this.underglow.scale.set(spread, 1, spread);
-    const glow = (0.4 + throttle * 0.34 + (boosting ? 0.45 : 0)) / (1 + lift * 0.5);
-    this.underglow.material.opacity = Math.min(0.92, glow);
+    const glow = (0.4 + throttle * 0.34 + hot * 0.5) / (1 + lift * 0.5);
+    this.underglow.material.opacity = Math.min(0.98, glow);
+    // The pool of light widens under a surging machine — cheap, and it reads
+    // as thrust even before the speed difference registers.
+    this.underglow.scale.set(spread * (1 + hot * 0.35), 1, spread * (1 + hot * 0.5));
 
-    const flare = 0.35 + throttle * 0.8 + (boosting ? 1.5 : 0);
+    const flare = 0.35 + throttle * 0.8 + hot * 1.6;
     this.thrust.scale.set(flare * 0.9, flare, 1);
-    this.thrust.material.opacity = Math.min(1, 0.3 + throttle * 0.6 + (boosting ? 0.6 : 0));
+    this.thrust.material.opacity = Math.min(1, 0.3 + throttle * 0.6 + hot * 0.65);
     this.thrust.material.color.set(boosting ? 0xffffff : this.machine.colors.glow);
   }
 

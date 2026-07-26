@@ -63,6 +63,9 @@ export class Race {
 
     this.time = 0;
     this.countdown = 3.6;
+    // Per-pair cooldowns for the contact impulse, keyed i*64+j. Edge-triggering
+    // the bump is what keeps a sustained side-by-side grind from vibrating.
+    this._bumpUntil = new Map();
     this.state = RACE_STATE.COUNTDOWN;
     this.events = [];                       // consumed by audio/UI each frame
 
@@ -306,6 +309,26 @@ export class Race {
         a.pos.addScaledVector(_v, -dir * push * (massB / total) * dt * 60);
         b.pos.addScaledVector(_v, dir * push * (massA / total) * dt * 60);
 
+        // The bumper-car impulse. The positional shove above stops overlap,
+        // but it reads as two magnets repelling; contact should read as a HIT,
+        // with the lighter machine visibly skating away and grip then hauling
+        // it back onto its heading — the lateral-velocity decay in Vehicle
+        // already models exactly that recovery, so all a collision has to do
+        // is inject the velocity.
+        //
+        // Sized by how hard the two are actually coming together (lateral
+        // closing plus a share of any speed difference), floored so even a
+        // gentle lean produces a real pop, and edge-triggered per pair so a
+        // sustained side-by-side grind is one thump, not a vibration.
+        const pairKey = i * 64 + j;
+        if ((this._bumpUntil.get(pairKey) ?? -1) < this.time) {
+          const latClose = Math.max(0, (b.vel.dot(_v) - a.vel.dot(_v)) * -dir);
+          const kick = Math.min(16, 4.5 + latClose * 0.8 + Math.abs(a.speed - b.speed) * 0.25);
+          a.vel.addScaledVector(_v, -dir * kick * (massB / total));
+          b.vel.addScaledVector(_v, dir * kick * (massA / total));
+          this._bumpUntil.set(pairKey, this.time + 0.3);
+        }
+
         // Longitudinal exchange: the one behind gives up speed, the one in
         // front gains it. Being rear-ended is a genuine shove forward, which is
         // what makes a crowded first corner an opportunity as well as a hazard.
@@ -313,7 +336,7 @@ export class Race {
         const ahead = ds > 0 ? b : a;
         const closing = behind.speed - ahead.speed;
         if (closing > 0) {
-          const transfer = Math.min(6, closing * 0.35);
+          const transfer = Math.min(10, closing * 0.5);
           behind.speed -= transfer * (ahead.params.massRatio / total);
           ahead.speed += transfer * (behind.params.massRatio / total);
         }
@@ -408,6 +431,7 @@ export class Race {
     if (!p) return;
     if (!p.alive && this.state === RACE_STATE.RACING) this.retire('DESTROYED');
     if (p.events.boostFired) this.emit('boost');
+    if (p.events.dash) this.emit('dash');
     if (p.events.jump) this.emit('jump');
     if (p.events.impact > 0.35) this.emit('impact', { force: p.events.impact });
     if (p.events.land > 0.2) this.emit('land', { force: p.events.land });
