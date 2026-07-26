@@ -82,7 +82,7 @@ export class Race {
     // Time Trial is genuinely solo. Practice keeps the full grid but drops the
     // qualification cut, which makes it useful for learning a circuit under
     // race conditions rather than a lonely lap around an empty track.
-    const fieldSize = this.mode === 'trial' ? 1 : (opts.opponents ?? 11) + 1;
+    const fieldSize = this.mode === 'trial' ? 1 : (opts.opponents ?? 5) + 1;
 
     // The player starts at the back. Working forward through a field is more
     // satisfying than defending a lead, and it makes the qualification cut
@@ -121,10 +121,15 @@ export class Race {
         const base = [0.62, 0.76, 0.9][clamp(this.difficulty, 0, 2)];
         const spread = 0.16;
         const skill = clamp01(base + spread * (1 - i / fieldSize) - rng() * 0.08);
-        this.drivers.push(new Driver(v, 1000 + i * 37, skill));
+        const d = new Driver(v, 1000 + i * 37, skill);
+        this.drivers.push(d);
       } else {
         this.drivers.push(null);
         this.player = v;
+      }
+      if (isPlayer) {
+        // Now the player exists, tell every AI driver whose space to respect.
+        for (const drv of this.drivers) if (drv) drv.keepClearOf = v;
       }
 
       this.entries.push({
@@ -299,34 +304,39 @@ export class Race {
         const dd = b.d - a.d;
         if (Math.abs(dd) > 5) continue;
 
-        // Separate laterally; the road is the only place either can go.
-        const push = (5 - Math.abs(dd)) * 0.5;
         const dir = Math.sign(dd) || 1;
         const massA = a.params.massRatio;
         const massB = b.params.massRatio;
         const total = massA + massB;
         _v.copy(a.up).cross(a.heading).normalize();   // lateral axis, either machine
-        a.pos.addScaledVector(_v, -dir * push * (massB / total) * dt * 60);
-        b.pos.addScaledVector(_v, dir * push * (massA / total) * dt * 60);
 
-        // The bumper-car impulse. The positional shove above stops overlap,
-        // but it reads as two magnets repelling; contact should read as a HIT,
-        // with the lighter machine visibly skating away and grip then hauling
-        // it back onto its heading — the lateral-velocity decay in Vehicle
-        // already models exactly that recovery, so all a collision has to do
-        // is inject the velocity.
-        //
-        // Sized by how hard the two are actually coming together (lateral
-        // closing plus a share of any speed difference), floored so even a
-        // gentle lean produces a real pop, and edge-triggered per pair so a
-        // sustained side-by-side grind is one thump, not a vibration.
+        // Signed lateral separation rate: positive means the pair is already
+        // flying apart. Everything below keys off this, because the failure
+        // mode of contact resolvers is exactly here — acting on machines that
+        // are already separating re-collides them into a vibrating clump.
+        const separating = (b.vel.dot(_v) - a.vel.dot(_v)) * dir;
+
+        // One elastic thump per collision, only while actually approaching.
+        // The lighter machine visibly skates away and the lateral-grip decay
+        // in Vehicle hauls it back onto its heading — the bumper-car recovery
+        // for free. The impulse SETS the pair separating, which disarms every
+        // clause below on the following tick: a clean break, by construction.
         const pairKey = i * 64 + j;
-        if ((this._bumpUntil.get(pairKey) ?? -1) < this.time) {
-          const latClose = Math.max(0, (b.vel.dot(_v) - a.vel.dot(_v)) * -dir);
-          const kick = Math.min(16, 4.5 + latClose * 0.8 + Math.abs(a.speed - b.speed) * 0.25);
+        if (separating < 0.5 && (this._bumpUntil.get(pairKey) ?? -1) < this.time) {
+          const kick = Math.min(18, 6 + Math.max(0, -separating) * 0.9
+            + Math.abs(a.speed - b.speed) * 0.2);
           a.vel.addScaledVector(_v, -dir * kick * (massB / total));
           b.vel.addScaledVector(_v, dir * kick * (massA / total));
-          this._bumpUntil.set(pairKey, this.time + 0.3);
+          this._bumpUntil.set(pairKey, this.time + 0.4);
+        }
+
+        // Positional separation only for deep overlap that the impulse has not
+        // yet cleared, and never against a pair that is already separating —
+        // shoving those is what made a packed field wiggle and stick.
+        if (Math.abs(dd) < 3.4 && separating < 2) {
+          const push = (3.4 - Math.abs(dd)) * 0.35;
+          a.pos.addScaledVector(_v, -dir * push * (massB / total) * dt * 60);
+          b.pos.addScaledVector(_v, dir * push * (massA / total) * dt * 60);
         }
 
         // Longitudinal exchange: the one behind gives up speed, the one in

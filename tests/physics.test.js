@@ -232,10 +232,10 @@ test('releasing the throttle restores grip', () => {
     const start = v.heading.clone();
     const startVel = v.vel.clone().normalize();
     const turn = { steer: 1, throttle, brake: 0, leanLeft: 0, leanRight: 0 };
-    // 1.0 s, not longer: the lifted machine turns hard enough at current top
-    // speeds to cross the test ring's half-width in ~1.1 s, and once the rail
+    // 0.6 s, not longer: the lifted machine turns hard enough at current top
+    // speeds to cross the test ring's half-width in ~0.7 s, and once the rail
     // resolver bites it eats the lateral velocity this test exists to measure.
-    for (let i = 0; i < 120 * 1.0; i++) v.update(DT, turn);
+    for (let i = 0; i < 120 * 0.6; i++) v.update(DT, turn);
     return {
       headingSwing: start.angleTo(v.heading),
       velocitySwing: startVel.angleTo(v.vel.clone().normalize()),

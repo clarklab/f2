@@ -32,14 +32,14 @@ export class ChaseCamera {
     this._targetUp = new THREE.Vector3();
 
     // Tuning.
-    this.baseDistance = 18.0;
-    this.speedDistance = 5.5;    // extra pull-back at full speed
+    this.baseDistance = 19.5;
+    this.speedDistance = 7.5;    // extra pull-back at full speed
     // Height and look-ahead together set how far the camera pitches down. Too
     // much of either and the view reads as isometric rather than as sitting in
     // the race.
     this.baseHeight = 6.8;
     this.speedHeight = -1.2;     // drops slightly as you go faster
-    this.lookAhead = 48;
+    this.lookAhead = 72;
     this.lookHeight = 3.4;
     this.baseFov = 58;
     this.speedFov = 20;          // total FOV kick across the speed range

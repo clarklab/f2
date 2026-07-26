@@ -256,7 +256,9 @@ class Game {
       machineId: this.machineId,
       mode,
       difficulty: this.difficulty,
-      opponents: mode === 'trial' ? 0 : 11,
+      // Six machines total. A twelve-car grid at the current contact rules
+      // clumped into a shoving match; six leaves room to actually race.
+      opponents: mode === 'trial' ? 0 : 5,
       spares: this.cup?.spares ?? 2,
     });
 
