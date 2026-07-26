@@ -318,6 +318,19 @@ test('the attract-mode driver wins every circuit it is shown on', () => {
   );
 });
 
+test('the screen is held awake for the demo and released when it ends', () => {
+  const g = fakeGame();
+  const demo = new Demo(g);
+  const log = [];
+  demo.wakeLock = { enable: () => log.push('on'), disable: () => log.push('off') };
+
+  run(demo, g, 20);
+  assert.deepEqual(log, ['on'], 'the screen was not held awake for the demo');
+
+  demo.tick(1 / 60, g._screen, true);
+  assert.deepEqual(log, ['on', 'off'], 'the hold outlived the demo');
+});
+
 test('tap markers expire so the screen does not fill with rings', () => {
   const g = fakeGame();
   const demo = new Demo(g);

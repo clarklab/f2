@@ -1,5 +1,6 @@
 import { MACHINES } from './Machines.js';
 import { TITLE_SONG } from '../audio/songs.js';
+import { WakeLock } from '../core/WakeLock.js';
 
 /**
  * Demo — the attract mode.
@@ -56,6 +57,9 @@ export class Demo {
     this.active = false;
     this.idle = 0;
     this.taps = [];          // visible ripples, consumed by the UI layer
+    // The demo runs for minutes with no input, which is exactly what a phone
+    // reads as "nobody is here" before it dims and locks.
+    this.wakeLock = new WakeLock();
     this._steps = null;
     this._i = 0;
     this._t = 0;
@@ -94,6 +98,7 @@ export class Demo {
       g.setScreen('title');
     }
     this.active = true;
+    this.wakeLock.enable();
     this.idle = 0;
     this._i = 0;
     this._t = 0;
@@ -104,6 +109,8 @@ export class Demo {
 
   stop() {
     this.active = false;
+    // Somebody is here now; their phone's own idle timer should decide.
+    this.wakeLock.disable();
     this.idle = 0;
     this.taps.length = 0;
     const g = this.game;
