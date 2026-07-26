@@ -16,7 +16,7 @@ with no images, audio or fonts alongside them.
 npm install
 npm run dev      # http://localhost:5173
 npm run build    # -> dist/
-npm test         # 44 tests: track geometry, physics, race rules, attract mode
+npm test         # 45 tests: track geometry, physics, race rules, attract mode
 ```
 
 ## Controls
@@ -29,6 +29,7 @@ npm test         # 44 tests: track geometry, physics, race rules, attract mode
 | Boost          | Right button above brake             | Shift or B | LB + RB            |
 | Lean / strafe  | Push the steer drag past ~80%        | Q / E      | LB / RB            |
 | Pause          | —                                    | P or Esc   | Start              |
+| Back           | BACK, top-left of any menu           | Esc or X   | B                  |
 
 Steering is a *relative* slider: wherever your thumb lands becomes centre, so
 there is nothing to aim for and no dead travel. Pushing past 80% engages the
@@ -41,6 +42,15 @@ way a cabinet does: it picks a machine, enters the championship, and races all
 six circuits back to back. Touch anything and it stops instantly and hands the
 game back — and that first touch is spent on the dismissal, so a stray tap drops
 you on the title screen rather than punching through into the menus.
+
+Every browsing screen counts down, not just the title one, because the title
+screen is not where people get left. A visitor's first tap is usually the one
+that starts the audio context — browsers will not start one without a gesture —
+and that tap lands them a screen deep in the menus. When only the title screen
+counted, the attract mode became unreachable the moment anyone touched the game,
+so the one thing it needed a gesture for was the one thing that killed it.
+Nothing counts down during a race, a pause or a results screen: those hold state
+a player would lose.
 
 It drives the real UI. Every menu step is a synthesised *tap* at a real screen
 position, pushed through the same input path a thumb uses, so the demo exercises

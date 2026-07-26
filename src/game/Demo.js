@@ -29,6 +29,27 @@ import { TITLE_SONG } from '../audio/songs.js';
 /** Seconds of stillness on the title screen before the demo takes over. */
 export const IDLE_BEFORE_DEMO = 7;
 
+/**
+ * How long each browsing screen tolerates being ignored.
+ *
+ * The title screen is not the only place somebody walks away from, and it is
+ * not even the most likely one: a visitor's first tap is usually the one that
+ * unlocks audio, and that tap lands them one screen deep. If only the title
+ * screen counted — as it did at first — the attract mode became unreachable the
+ * moment anyone touched the game, which is the opposite of what an attract mode
+ * is for. So every screen where nothing is happening counts down.
+ *
+ * The menus get longer than the title screen because being on one is weak
+ * evidence that somebody is there and reading it. Nothing counts down during a
+ * race, a pause, or a results screen: those hold state a player would lose.
+ */
+const IDLE_BY_SCREEN = {
+  title: IDLE_BEFORE_DEMO,
+  mode: 16,
+  machine: 16,
+  track: 16,
+};
+
 export class Demo {
   constructor(game) {
     this.game = game;
@@ -42,7 +63,7 @@ export class Demo {
     this._dwell = 0;
   }
 
-  /** Count idle time on the title screen; start the demo when it runs out. */
+  /** Count idle time on whichever screen is up; start the demo when it runs out. */
   tick(dt, screen, hadRealInput) {
     if (hadRealInput) {
       if (this.active) this.stop();
@@ -53,15 +74,25 @@ export class Demo {
     this.taps = this.taps.filter((r) => r.t < 0.55);
 
     if (this.active) { this._run(dt); return; }
-    if (screen === 'title') {
+    const limit = IDLE_BY_SCREEN[screen];
+    if (limit) {
       this.idle += dt;
-      if (this.idle >= IDLE_BEFORE_DEMO) this.start();
+      if (this.idle >= limit) this.start();
     } else {
       this.idle = 0;
     }
   }
 
   start() {
+    const g = this.game;
+    // The script opens on the title screen, so walk back to it first. The demo
+    // can be triggered from any of the browsing screens now, and every one of
+    // them is somewhere a person could have wandered to and left.
+    if (g._screen !== 'title') {
+      g.cup = null;
+      g.race = null;
+      g.setScreen('title');
+    }
     this.active = true;
     this.idle = 0;
     this._i = 0;
