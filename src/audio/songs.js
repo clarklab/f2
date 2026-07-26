@@ -1,46 +1,78 @@
 /**
  * Music.
  *
- * Each song is 16-step patterns plus a bar-by-bar chord sequence. The idiom is
- * deliberately specific: a minor/Dorian vamp, relentless sixteenth-note bass
- * with octave pops, and a fast arpeggio standing in for a chord — the arpeggio
- * is the chiptune trick where cycling a triad faster than the ear can separate
- * fuses into a chord, which is how a machine with three tone channels plays
- * harmony and a melody at the same time.
+ * Each song is 16-step patterns plus a bar-by-bar chord sequence, played by the
+ * sequencer in Audio.js. The current idiom is dark space techno: four-on-the-
+ * floor kicks, an acid bass (filter-swept saw over a sine sub) running
+ * sixteenths, a detuned-saw pad washing under each bar, sparse minor-key leads
+ * that trail off into a feedback echo, and a four-bar cycle of noise risers and
+ * sonar pings to keep the void audible between phrases.
+ *
+ * Tension comes from the harmony more than the tempo: nearly everything vamps
+ * on Phrygian moves (i - bII, the semitone above the root) or minor chords a
+ * tritone apart, which never resolve and never relax.
  *
  * Token meanings:
  *   bass   null = rest, 0 = chord root, 1 = root an octave up, n>1 = root + n
  *   arp    null = rest, otherwise an index into the current chord's intervals
  *   lead   absolute MIDI, null = rest, -1 = hold the previous note
  *   drums  1 = hit
+ *
+ * Song flags read by the sequencer:
+ *   bassStyle: 'acid'   filter-swept saw + sub instead of the plain triangle
+ *   pad: true           bar-long detuned-saw wash on the current chord
+ *   fx: true            riser / sonar-ping cycle every four bars
+ *   leadEcho: 0..1      how much of the lead feeds the echo bus
+ *   leadDuty            pulse duty for the lead (0.5 square, 0.25 thin)
  */
 
 const MINOR = [0, 3, 7];
 const MAJOR = [0, 4, 7];
+const MINOR7 = [0, 3, 7, 10];
 const SUS = [0, 5, 7];
 
-/** i - bVI - bIII - bVII: endless forward motion, never resolves. */
+/** i - bII: the Phrygian semitone. Pure menace, never resolves. */
+const PHRYGIAN_VAMP = [
+  [0, MINOR7], [0, MINOR7], [1, MAJOR], [1, MAJOR],
+  [0, MINOR7], [0, MINOR7], [10, MINOR], [1, MAJOR],
+];
+
+/** i - bVI - bIII - bVII: endless forward motion. */
 const DRIVING_MINOR = [
-  [0, MINOR], [0, MINOR], [8, MAJOR], [8, MAJOR],
+  [0, MINOR7], [0, MINOR7], [8, MAJOR], [8, MAJOR],
   [3, MAJOR], [3, MAJOR], [10, MAJOR], [10, MAJOR],
 ];
 
-/** i - IV: the major fourth over a minor tonic is *the* Dorian racing sound. */
-const DORIAN_VAMP = [
-  [0, MINOR], [0, MINOR], [5, MAJOR], [5, MAJOR],
-  [0, MINOR], [0, MINOR], [10, MAJOR], [7, SUS],
+/** i - iv - i - tritone: the unsettled one, for the hazard circuits. */
+const TENSE_ORBIT = [
+  [0, MINOR7], [0, MINOR7], [5, MINOR], [5, MINOR],
+  [0, MINOR7], [0, MINOR7], [6, MAJOR], [1, MAJOR],
 ];
 
-const STRAIGHT_BASS = [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 7, 11];
-const PUMP_BASS = [0, null, 0, 1, 0, null, 0, 1, 0, null, 0, 1, 0, 1, 0, 7];
-const ARP_UP = [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 1];
-const ARP_ROLL = [0, 2, 1, 2, 0, 2, 1, 2, 0, 2, 1, 2, 0, 1, 2, 1];
+// Acid lines. Values are semitone offsets from the root (12 = octave pop),
+// written so the filter accents on the downbeats land on roots and the
+// syncopation lives in the octaves and sevenths.
+const ACID_DRIVE = [0, 0, 12, 0, 0, 10, 0, 12, 0, 0, 12, 0, 3, 0, 10, 12];
+const ACID_ROLL = [0, null, 0, 12, 0, null, 10, 0, 0, null, 0, 12, 3, 0, 12, 10];
+const ACID_DARK = [0, 0, 0, 12, 0, 0, 3, 0, 0, 0, 0, 12, 0, 10, 3, 0];
 
-const BEAT = {
-  kick: [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+const ARP_UP = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3];
+const ARP_SPARSE = [0, null, 2, null, 1, null, 3, null, 0, null, 2, null, 1, 3, null, 2];
+
+// Four on the floor, clap on 2 and 4, offbeat hats: the techno chassis.
+const FLOOR = {
+  kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+  snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+  hat: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1],
+  ohat: [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+};
+
+// The same chassis with a kick pushed onto the and-of-three: more drive.
+const FLOOR_PUSH = {
+  kick: [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0],
   snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
-  hat: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  ohat: [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0],
+  hat: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+  ohat: [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0],
 };
 
 const HALF_TIME = {
@@ -50,112 +82,141 @@ const HALF_TIME = {
   ohat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
 };
 
-/** Title screen: slower, wide, expectant. */
+/**
+ * Title screen: slow, vast, expectant. Mostly pad and sub with the sonar
+ * pinging into the dark; the lead is four long notes that each dissolve into
+ * the echo before the next one lands.
+ */
 export const TITLE_SONG = {
-  bpm: 112,
-  key: 60,
-  chords: DRIVING_MINOR,
-  bass: PUMP_BASS,
-  arp: ARP_ROLL,
+  bpm: 96,
+  key: 57,                       // A Phrygian
+  chords: PHRYGIAN_VAMP,
+  bassStyle: 'acid',
+  pad: true,
+  fx: true,
+  leadEcho: 0.5,
+  leadDuty: 0.25,
+  bass: [0, null, null, null, 0, null, 12, null, 0, null, null, null, 10, null, null, null],
+  arp: [null, null, 0, null, null, null, 2, null, null, null, 1, null, null, null, 3, null],
   lead: [
-    79, null, null, 82, 84, -1, -1, null,
-    82, null, 79, null, 75, -1, -1, null,
-    77, null, null, 79, 82, -1, -1, null,
-    79, null, 75, null, 72, -1, -1, -1,
+    69, -1, -1, -1, -1, -1, null, null,
+    72, -1, -1, -1, -1, null, null, null,
+    70, -1, -1, -1, -1, -1, null, null,
+    64, -1, -1, -1, -1, -1, -1, -1,
   ],
   ...HALF_TIME,
 };
 
 const RACE_SONGS = {
   city: {
-    bpm: 172,
-    key: 60,                     // C Dorian
-    chords: DORIAN_VAMP,
-    bass: STRAIGHT_BASS,
-    arp: ARP_UP,
+    bpm: 174,
+    key: 57,                     // A minor — the neon commute
+    chords: DRIVING_MINOR,
+    bassStyle: 'acid',
+    pad: true,
+    fx: true,
+    leadEcho: 0.35,
+    bass: ACID_DRIVE,
+    arp: ARP_SPARSE,
     lead: [
-      84, null, 87, null, 89, -1, 87, null,
-      84, null, 79, null, 82, -1, -1, null,
-      84, null, 87, null, 91, -1, 89, null,
-      87, null, 84, null, 79, -1, -1, null,
+      81, null, null, 84, 86, -1, null, 84,
+      81, null, 76, null, 79, -1, -1, null,
+      81, null, null, 88, 87, -1, null, 84,
+      86, -1, null, 81, 79, -1, -1, null,
     ],
-    ...BEAT,
+    ...FLOOR,
   },
   ocean: {
-    bpm: 164,
-    key: 62,                     // D
-    chords: DORIAN_VAMP,
-    bass: PUMP_BASS,
-    arp: ARP_ROLL,
+    bpm: 166,
+    key: 62,                     // D — the wide one; more echo, fewer notes
+    chords: DRIVING_MINOR,
+    bassStyle: 'acid',
+    pad: true,
+    fx: true,
+    leadEcho: 0.5,
+    leadDuty: 0.25,
+    bass: ACID_ROLL,
+    arp: ARP_SPARSE,
     lead: [
-      86, null, null, 89, 91, -1, -1, 89,
-      86, null, 84, null, 81, -1, -1, null,
-      84, null, 86, null, 89, -1, 86, null,
-      84, null, 81, null, 79, -1, -1, -1,
+      86, -1, null, null, 89, -1, -1, null,
+      85, -1, null, 81, -1, null, null, null,
+      86, -1, null, null, 93, -1, -1, null,
+      91, -1, null, 89, -1, -1, null, null,
     ],
-    ...BEAT,
+    ...FLOOR,
   },
   desert: {
-    bpm: 158,
-    key: 57,                     // A
-    chords: DRIVING_MINOR,
-    bass: STRAIGHT_BASS,
+    bpm: 170,
+    key: 55,                     // G — rolling, hypnotic
+    chords: PHRYGIAN_VAMP,
+    bassStyle: 'acid',
+    pad: true,
+    fx: true,
+    leadEcho: 0.3,
+    bass: ACID_DRIVE,
     arp: ARP_UP,
     lead: [
-      81, null, 84, -1, 88, null, 84, null,
-      81, null, 76, null, 79, -1, -1, null,
-      81, null, 88, -1, 86, null, 84, null,
-      81, null, 79, null, 76, -1, -1, null,
+      79, null, 82, -1, 86, null, 84, null,
+      79, null, 74, null, 77, -1, -1, null,
+      79, null, 86, -1, 84, null, 82, null,
+      80, -1, 79, null, 74, -1, -1, null,
     ],
-    ...BEAT,
+    ...FLOOR_PUSH,
   },
   grid: {
     bpm: 178,
-    key: 59,                     // B — tense
-    chords: [
-      [0, MINOR], [0, MINOR], [1, MAJOR], [1, MAJOR],
-      [0, MINOR], [0, MINOR], [10, MAJOR], [8, MAJOR],
-    ],
-    bass: STRAIGHT_BASS,
-    arp: ARP_ROLL,
+    key: 59,                     // B Phrygian — the mine field wants dread
+    chords: PHRYGIAN_VAMP,
+    bassStyle: 'acid',
+    pad: true,
+    fx: true,
+    leadEcho: 0.4,
+    leadDuty: 0.25,
+    bass: ACID_DARK,
+    arp: ARP_SPARSE,
     lead: [
-      83, 83, null, 86, 88, null, 86, null,
-      83, null, 81, null, 78, -1, -1, null,
-      83, 83, null, 88, 90, null, 88, null,
-      86, null, 83, null, 81, -1, -1, null,
+      83, 83, null, null, 84, -1, null, null,
+      83, null, 78, null, 76, -1, -1, null,
+      83, 83, null, null, 90, -1, null, 88,
+      84, -1, null, 83, -1, -1, null, null,
     ],
-    ...BEAT,
+    ...FLOOR,
   },
   wind: {
-    bpm: 168,
-    key: 55,                     // G
-    chords: DORIAN_VAMP,
-    bass: PUMP_BASS,
-    arp: ARP_UP,
+    bpm: 172,
+    key: 60,                     // C — high pressure, forward lean
+    chords: TENSE_ORBIT,
+    bassStyle: 'acid',
+    pad: true,
+    fx: true,
+    leadEcho: 0.35,
+    bass: ACID_ROLL,
+    arp: ARP_SPARSE,
     lead: [
-      79, null, 82, null, 86, -1, -1, 84,
-      82, null, 79, null, 74, -1, -1, null,
-      77, null, 79, null, 82, -1, -1, null,
-      79, null, 74, null, 72, -1, -1, -1,
+      84, null, 87, null, 91, -1, null, 89,
+      87, null, 84, null, 79, -1, -1, null,
+      84, null, 87, null, 90, -1, null, null,
+      87, -1, 84, null, 82, -1, -1, null,
     ],
-    ...BEAT,
+    ...FLOOR_PUSH,
   },
   fire: {
-    bpm: 184,                    // the finale, and the fastest
-    key: 58,
-    chords: [
-      [0, MINOR], [0, MINOR], [8, MAJOR], [7, MAJOR],
-      [0, MINOR], [3, MAJOR], [10, MAJOR], [7, MAJOR],
-    ],
-    bass: STRAIGHT_BASS,
-    arp: ARP_ROLL,
+    bpm: 186,                    // the finale: fastest, darkest
+    key: 58,                     // Bb Phrygian
+    chords: TENSE_ORBIT,
+    bassStyle: 'acid',
+    pad: true,
+    fx: true,
+    leadEcho: 0.35,
+    bass: ACID_DRIVE,
+    arp: ARP_UP,
     lead: [
-      82, 82, null, 85, 89, -1, 87, null,
+      82, 82, null, 85, 89, -1, null, 87,
       85, null, 82, null, 77, -1, -1, null,
-      82, 82, null, 89, 92, -1, 90, null,
-      89, null, 85, null, 82, -1, -1, null,
+      82, 82, null, 89, 94, -1, null, 92,
+      89, -1, 85, null, 82, -1, -1, null,
     ],
-    ...BEAT,
+    ...FLOOR_PUSH,
   },
 };
 

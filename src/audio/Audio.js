@@ -82,6 +82,24 @@ export class Audio {
     this.busMusic = ctx.createGain(); this.busMusic.gain.value = 0.42;
     for (const b of [this.busEngine, this.busSfx, this.busMusic]) b.connect(this.comp);
 
+    // A feedback echo shared by the music voices. Space is the brief: the lead
+    // and the FX pings send into it and their repeats trail away behind the
+    // music, darkening as they go (the lowpass sits inside the loop, so every
+    // pass through it stacks). One delay for everything, like the reverb.
+    this.echoIn = ctx.createGain();
+    this.echoDelay = ctx.createDelay(1.0);
+    this.echoDelay.delayTime.value = 0.29;
+    this.echoTone = ctx.createBiquadFilter();
+    this.echoTone.type = 'lowpass';
+    this.echoTone.frequency.value = 2600;
+    this.echoFb = ctx.createGain();
+    this.echoFb.gain.value = 0.42;
+    this.echoIn.connect(this.echoDelay);
+    this.echoDelay.connect(this.echoTone);
+    this.echoTone.connect(this.echoFb);
+    this.echoFb.connect(this.echoDelay);
+    this.echoTone.connect(this.busMusic);
+
     // One reverb for the whole game. A ConvolverNode is among the most
     // expensive nodes available, so it is a single shared send, never per-voice.
     this.reverb = ctx.createConvolver();
@@ -433,7 +451,7 @@ export class Audio {
   }
 
   /** Short chiptune blip: pulse wave with stepped pitch and a fast envelope. */
-  chip(steps, { dur = 0.09, duty = 0.5, gain = 0.26, at = null, dest = null, vibrato = 0 } = {}) {
+  chip(steps, { dur = 0.09, duty = 0.5, gain = 0.26, at = null, dest = null, vibrato = 0, echo = 0 } = {}) {
     if (!this.ready) return;
     const ctx = this.ctx;
     const t = at ?? this.time;
@@ -459,6 +477,12 @@ export class Audio {
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g);
     g.connect(dest ?? this.busSfx);
+    if (echo > 0 && this.echoIn) {
+      const e = ctx.createGain();
+      e.gain.value = echo;
+      g.connect(e);
+      e.connect(this.echoIn);
+    }
     o.start(t);
     o.stop(t + dur + 0.02);
     this._free(g, t + dur);
@@ -746,12 +770,29 @@ export class Audio {
     const quality = chord[1];
     const stepDur = (60 / this.seq.tempo) / 4;
 
-    // Bass: relentless sixteenths with octave pops. This pattern is most of
-    // what makes the genre feel fast.
+    // Bass: relentless sixteenths. This pattern is most of what makes the
+    // genre feel fast. Songs opt into the acid voice — a filter-swept saw over
+    // a sine sub — which is where most of the techno lives.
     const bassTok = song.bass[i];
     if (bassTok !== null) {
       const n = root - 24 + (bassTok === 1 ? 12 : 0) + (typeof bassTok === 'number' && bassTok > 1 ? bassTok : 0);
-      this._tri(n, when, stepDur * 0.92, 0.3);
+      if (song.bassStyle === 'acid') this._acid(n, when, stepDur * 0.92, i % 4 === 0);
+      else this._tri(n, when, stepDur * 0.92, 0.3);
+    }
+
+    // Pad: a dark two-oscillator wash under each bar. It sits far back in the
+    // mix, but it is what turns a pattern into a place.
+    if (song.pad && i === 0) {
+      this._pad(root, quality, when, stepDur * 16);
+    }
+
+    // Space FX on a four-bar cycle: a filtered-noise riser into the odd bars,
+    // a sonar ping answered by the echo bus on the others. Deterministic by
+    // bar, so the song breathes on a schedule rather than at random.
+    if (song.fx && i === 0) {
+      const bar = this.seq.bar;
+      if (bar % 4 === 2) this._riser(when, stepDur * 16);
+      else if (bar % 4 === 0 && bar > 0) this._ping(root + 36, when);
     }
 
     // Arpeggio: a chord tone per sixteenth. At this tempo the ear fuses them
@@ -763,14 +804,16 @@ export class Audio {
       });
     }
 
-    // Lead.
+    // Lead. The echo send is per-song: the space songs let every phrase trail
+    // off into the delay, which fills the gaps the sparser writing leaves.
     const lead = song.lead[(step % song.lead.length)];
     if (lead !== null && lead !== -1) {
       let len = stepDur;
       let k = (step % song.lead.length) + 1;
       while (k < song.lead.length && song.lead[k] === -1) { len += stepDur; k++; }
       this.chip([lead], {
-        at: when, dur: len * 0.95, duty: 0.5, gain: 0.13, dest: this.busMusic, vibrato: 18,
+        at: when, dur: len * 0.95, duty: song.leadDuty ?? 0.5, gain: 0.12,
+        dest: this.busMusic, vibrato: 18, echo: song.leadEcho ?? 0,
       });
     }
 
@@ -794,6 +837,114 @@ export class Audio {
     o.connect(lp); lp.connect(g); g.connect(this.busMusic);
     o.start(when); o.stop(when + dur + 0.02);
     this._free(g, when + dur);
+  }
+
+  /**
+   * Acid bass: a sawtooth through a resonant lowpass whose cutoff is an
+   * envelope, over a sine sub an octave down. The sweep is the squelch; the
+   * sub is the weight the saw alone does not have. Accented steps open the
+   * filter harder, which is what makes a static pattern move.
+   */
+  _acid(midi, when, dur, accent) {
+    const ctx = this.ctx;
+    const saw = ctx.createOscillator();
+    saw.type = 'sawtooth';
+    saw.frequency.setValueAtTime(mtof(midi), when);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.Q.value = 9;
+    lp.frequency.setValueAtTime(accent ? 2100 : 1100, when);
+    lp.frequency.exponentialRampToValueAtTime(220, when + dur);
+    const sg = ctx.createGain();
+    sg.gain.setValueAtTime(0.0001, when);
+    sg.gain.linearRampToValueAtTime(accent ? 0.3 : 0.22, when + 0.005);
+    sg.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    saw.connect(lp); lp.connect(sg); sg.connect(this.busMusic);
+    saw.start(when); saw.stop(when + dur + 0.02);
+
+    const sub = ctx.createOscillator();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(mtof(midi - 12), when);
+    const bg = ctx.createGain();
+    bg.gain.setValueAtTime(0.0001, when);
+    bg.gain.linearRampToValueAtTime(0.24, when + 0.006);
+    bg.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    sub.connect(bg); bg.connect(this.busMusic);
+    sub.start(when); sub.stop(when + dur + 0.02);
+    this._free(sg, when + dur);
+    this._free(bg, when + dur);
+  }
+
+  /**
+   * Pad: two detuned saws on root and fifth through a slow lowpass, one bar
+   * long, quiet. The detune beats against itself, which is the whole "synth
+   * wash" effect; the send into the echo smears the bar changes together.
+   */
+  _pad(root, quality, when, dur) {
+    const ctx = this.ctx;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(520, when);
+    lp.frequency.linearRampToValueAtTime(980, when + dur * 0.6);
+    lp.frequency.linearRampToValueAtTime(520, when + dur);
+    lp.Q.value = 0.8;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(0.055, when + dur * 0.25);
+    g.gain.setValueAtTime(0.055, when + dur * 0.8);
+    g.gain.linearRampToValueAtTime(0.0001, when + dur + 0.05);
+    lp.connect(g); g.connect(this.busMusic);
+    const e = ctx.createGain();
+    e.gain.value = 0.12;
+    g.connect(e); e.connect(this.echoIn);
+
+    const fifth = quality[2] ?? 7;
+    for (const [m, cents] of [[root, -7], [root, 6], [root + fifth, -5], [root + fifth + 12, 4]]) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(mtof(m), when);
+      o.detune.value = cents;
+      o.connect(lp);
+      o.start(when); o.stop(when + dur + 0.1);
+    }
+    this._free(g, when + dur + 0.1);
+  }
+
+  /** A filtered-noise riser: tension that resolves onto the next downbeat. */
+  _riser(when, dur) {
+    const ctx = this.ctx;
+    const n = this._noiseSource(false, false);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.6;
+    bp.frequency.setValueAtTime(260, when);
+    bp.frequency.exponentialRampToValueAtTime(3400, when + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(0.07, when + dur * 0.85);
+    g.gain.linearRampToValueAtTime(0.0001, when + dur);
+    n.connect(bp); bp.connect(g); g.connect(this.busMusic);
+    n.start(when); n.stop(when + dur + 0.02);
+    this._free(g, when + dur + 0.05);
+  }
+
+  /** A sonar blip that the echo bus answers. The cheapest space there is. */
+  _ping(midi, when) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(mtof(midi), when);
+    o.frequency.exponentialRampToValueAtTime(mtof(midi) * 0.985, when + 0.16);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(0.11, when + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.18);
+    o.connect(g); g.connect(this.busMusic);
+    const e = ctx.createGain();
+    e.gain.value = 0.85;
+    g.connect(e); e.connect(this.echoIn);
+    o.start(when); o.stop(when + 0.2);
+    this._free(g, when + 0.25);
   }
 
   _kick(when) {
