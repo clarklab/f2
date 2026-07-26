@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>V-ZERO canvas diagnostic</title>
+<!--
+  Standalone diagnostic. No build step, no imports, no cache-sensitive assets —
+  open it and it reports what this device actually does.
+
+  It exists because a black band across the top of the game could not be
+  reproduced in any browser available to the developer, and a screenshot can
+  only ever show the symptom. The decisive question is narrow: does *this*
+  browser correctly composite a WebGL canvas whose drawing buffer is much
+  smaller than its CSS box? Test A asks exactly that. Test B is the control:
+  identical in every way except that its buffer matches its box 1:1, which is
+  what the shipped game now does.
+
+  Each canvas paints a magenta frame around its full extent and a bright dot in
+  each corner. If WebGL content reaches all four corners, that canvas is being
+  composited correctly. If part of it is black, it is not.
+-->
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 16px 14px 48px;
+    background: #05060d; color: #cfd6ff;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1 { font-size: 15px; margin: 0 0 4px; color: #40e0ff; letter-spacing: .08em; }
+  h2 { font-size: 13px; margin: 22px 0 6px; color: #ffd23f; letter-spacing: .06em; }
+  p  { margin: 0 0 10px; color: #8b95c4; }
+  .verdict { padding: 10px 12px; border-radius: 6px; margin: 6px 0 2px; font-weight: bold; }
+  .pass { background: #10331f; color: #5cff9d; border: 1px solid #2c6b45; }
+  .fail { background: #3a1119; color: #ff6b6b; border: 1px solid #7d2a35; }
+  .warn { background: #33270f; color: #ffd23f; border: 1px solid #6b5a2c; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 3px 0; vertical-align: top; }
+  td:first-child { color: #8b95c4; padding-right: 12px; white-space: nowrap; }
+  td:last-child { color: #f2f6ff; word-break: break-all; }
+  .stage { position: relative; height: 220px; margin: 8px 0 4px;
+           background: #000; border: 1px solid #39436e; overflow: hidden; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%;
+                  display: block; image-rendering: pixelated; }
+  button { font: inherit; background: #1d2647; color: #f2f6ff; border: 1px solid #39436e;
+           border-radius: 6px; padding: 10px 16px; margin-top: 18px; width: 100%; }
+</style>
+</head>
+<body>
+
+<h1>V-ZERO CANVAS DIAGNOSTIC</h1>
+<p id="stamp">Reading build…</p>
+
+<h2>1. WHICH BUILD IS THE SERVER ON</h2>
+<table id="build"></table>
+
+<h2>2. IS YOUR BROWSER HOLDING AN OLD COPY</h2>
+<div id="cache"></div>
+
+<h2>3. THIS DEVICE</h2>
+<table id="device"></table>
+
+<h2>4. TEST A — tiny buffer, stretched by CSS</h2>
+<p>What the game used to do: a buffer a quarter the size of the box in each
+axis, left to CSS to blow back up.</p>
+<div class="stage" id="stageA"><canvas id="a"></canvas></div>
+<div id="verdictA"></div>
+
+<h2>5. TEST B — buffer matches the box 1:1</h2>
+<p>What the game does now. Identical CSS, identical shader.</p>
+<div class="stage" id="stageB"><canvas id="b"></canvas></div>
+<div id="verdictB"></div>
+
+<h2>6. RESULT</h2>
+<div id="summary"></div>
+
+<button onclick="location.reload(true)">RELOAD</button>
+
+<script>
+const rows = (el, pairs) => {
+  document.getElementById(el).innerHTML = pairs
+    .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+};
+
+// --- 1. what the server is serving right now --------------------------------
+// `cache: 'no-store'` so this reports the server's state, not the phone's.
+(async () => {
+  try {
+    const res = await fetch('./index.html', { cache: 'no-store' });
+    const html = await res.text();
+    const asset = (html.match(/assets\/index-[A-Za-z0-9_-]+\.js/) || ['(not found)'])[0];
+    rows('build', [
+      ['bundle', asset],
+      ['expected', 'assets/index-nW59RAbV.js or newer'],
+      ['origin', location.origin],
+      ['fetched', new Date().toISOString()],
+    ]);
+    document.getElementById('stamp').textContent =
+      'Diagnostic page loaded fresh. The bundle line below is read from the server with caching disabled.';
+  } catch (e) {
+    rows('build', [['error', String(e)]]);
+  }
+})();
+
+// --- 2. is the phone's cache stale? -----------------------------------------
+// The bundle filename is content-hashed, so if the copy the browser would use
+// names a different bundle than the copy the server has right now, the browser
+// is holding a stale document. That is the whole question, answered directly
+// rather than by squinting at the game.
+(async () => {
+  const hashOf = async (init) => {
+    const html = await (await fetch('./index.html', init)).text();
+    return (html.match(/assets\/index-[A-Za-z0-9_-]+\.js/) || ['(none)'])[0];
+  };
+  try {
+    const [fresh, cached] = await Promise.all([
+      hashOf({ cache: 'no-store' }),
+      hashOf({ cache: 'force-cache' }),
+    ]);
+    const same = fresh === cached;
+    document.getElementById('cache').innerHTML =
+      `<div class="verdict ${same ? 'pass' : 'fail'}">` +
+      (same
+        ? 'UP TO DATE — your browser would load the same bundle the server has.'
+        : 'STALE — your browser is holding an older copy. Force-reload the game.') +
+      `</div><table><tr><td>server has</td><td>${fresh}</td></tr>` +
+      `<tr><td>your cache has</td><td>${cached}</td></tr></table>` +
+      `<p><a style="color:#40e0ff" href="./?cachebust=${Date.now()}">Open the game with a cache-busting URL &rarr;</a></p>`;
+  } catch (e) {
+    document.getElementById('cache').innerHTML = `<div class="verdict warn">${e}</div>`;
+  }
+})();
+
+// --- 3. device facts ---------------------------------------------------------
+const vv = window.visualViewport;
+rows('device', [
+  ['devicePixelRatio', String(devicePixelRatio)],
+  ['innerWidth x innerHeight', `${innerWidth} x ${innerHeight}`],
+  ['visualViewport', vv ? `${vv.width.toFixed(1)} x ${vv.height.toFixed(1)} @ ${vv.offsetLeft},${vv.offsetTop}` : 'unsupported'],
+  ['screen', `${screen.width} x ${screen.height}`],
+  ['userAgent', navigator.userAgent],
+]);
+
+// --- 3/4. the two canvases ---------------------------------------------------
+const VERT = `
+attribute vec2 p;
+varying vec2 v;
+void main() { v = p * 0.5 + 0.5; gl_Position = vec4(p, 0.0, 1.0); }`;
+
+// A magenta frame hugging all four edges, a bright dot in each corner, and a
+// gradient between. Anything missing from the corners means the content is not
+// reaching the element's edges.
+const FRAG = `
+precision mediump float;
+uniform vec2 uRes;
+varying vec2 v;
+void main() {
+  vec2 px = v * uRes;
+  vec2 edge = min(px, uRes - px);
+  float frame = step(min(edge.x, edge.y), 2.0);
+  float corner = step(max(edge.x, edge.y), 12.0);
+  vec3 c = mix(vec3(0.1, 0.25, 0.6), vec3(0.15, 0.7, 0.55), v.y);
+  c = mix(c, vec3(1.0, 0.2, 0.75), frame);
+  c = mix(c, vec3(1.0, 1.0, 0.2), corner);
+  gl_FragColor = vec4(c, 1.0);
+}`;
+
+function paint(canvas, bufW, bufH) {
+  canvas.width = bufW;
+  canvas.height = bufH;
+  const gl = canvas.getContext('webgl', { alpha: false, antialias: false });
+  if (!gl) return null;
+  const sh = (t, src) => {
+    const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); return s;
+  };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VERT));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+  gl.bindAttribLocation(prog, 0, 'p');
+  gl.linkProgram(prog);
+  gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.uniform2f(gl.getUniformLocation(prog, 'uRes'), bufW, bufH);
+  gl.viewport(0, 0, bufW, bufH);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  return gl;
+}
+
+function describe(id, canvas, gl) {
+  const box = canvas.getBoundingClientRect();
+  const boxDev = [box.width * devicePixelRatio, box.height * devicePixelRatio];
+  const vp = gl ? Array.from(gl.getParameter(gl.VIEWPORT)) : [];
+  const stretch = [canvas.width / boxDev[0], canvas.height / boxDev[1]];
+  document.getElementById(id).innerHTML =
+    `<table><tr><td>drawing buffer</td><td>${canvas.width} x ${canvas.height}</td></tr>` +
+    `<tr><td>CSS box</td><td>${box.width.toFixed(1)} x ${box.height.toFixed(1)} css` +
+    ` (${boxDev[0].toFixed(0)} x ${boxDev[1].toFixed(0)} device px)</td></tr>` +
+    `<tr><td>gl viewport</td><td>[${vp}]</td></tr>` +
+    `<tr><td>buffer / box</td><td>${stretch[0].toFixed(3)} x ${stretch[1].toFixed(3)}` +
+    ` &nbsp;(1.000 = no browser scaling)</td></tr></table>`;
+}
+
+const ca = document.getElementById('a');
+const cb = document.getElementById('b');
+requestAnimationFrame(() => {
+  const boxA = ca.getBoundingClientRect();
+  // Exactly the game's old arrangement: a buffer a quarter the size of the box
+  // in each axis, same aspect, left to CSS to blow back up.
+  const glA = paint(ca,
+    Math.max(1, Math.round(boxA.width * devicePixelRatio / 4)),
+    Math.max(1, Math.round(boxA.height * devicePixelRatio / 4)));
+  const boxB = cb.getBoundingClientRect();
+  const glB = paint(cb,
+    Math.max(1, Math.round(boxB.width * devicePixelRatio)),
+    Math.max(1, Math.round(boxB.height * devicePixelRatio)));
+  describe('verdictA', ca, glA);
+  describe('verdictB', cb, glB);
+
+  const note = (cls, text) => `<div class="verdict ${cls}">${text}</div>`;
+  document.getElementById('summary').innerHTML =
+    note('warn',
+      'Look at the two boxes above. Each should show a magenta frame touching all ' +
+      'four edges with a yellow dot in every corner.') +
+    '<p>If <b>A</b> has black areas and <b>B</b> is complete, that reproduces the bug ' +
+    'and confirms the fix. If <b>both</b> are complete, this device composites both ' +
+    'arrangements fine and the black band in the game comes from something else. ' +
+    'If <b>both</b> are broken, WebGL compositing is failing regardless of buffer size.</p>';
+});
+</script>
+</body>
+</html>
