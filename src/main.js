@@ -49,8 +49,7 @@ class Game {
     this.display = new Display();
     this.input = new Input(this.display);
     this.renderer = new PixelRenderer(
-      this.display.sceneCanvas, this.display.width, this.display.height,
-      this.display.deviceWidth, this.display.deviceHeight,
+      this.display.present, this.display.width, this.display.height,
     );
     this.ui = new UI(this.display);
     this.audio = new Audio();
@@ -66,7 +65,7 @@ class Game {
     // on rotation and every time a mobile URL bar slides in or out. Everything
     // that caches a size has to be told.
     this.display.onResize = (d) => {
-      this.renderer.resize(d.width, d.height, d.deviceWidth, d.deviceHeight);
+      this.renderer.resize(d.width, d.height);
       this.chaseCam.aspect = d.aspect;
       this.camera.aspect = d.aspect;
       this.camera.updateProjectionMatrix();
@@ -807,10 +806,9 @@ if (/[?&]debug\b/.test(location.search)) {
       `stage  ${rect(d.stage)}`,
       `scene  ${rect(d.sceneCanvas)}`,
       `ui     ${rect(d.uiCanvas)}`,
-      `internal ${p.internal.join('x')}  step ${d.pixelScale}`,
-      `device ${d.deviceWidth}x${d.deviceHeight}  requestedOut ${p.requestedOut.join('x')}`,
-      `canvas.attr ${p.canvasAttr.join('x')}  drawingBuffer ${p.drawingBuffer.join('x')}`,
-      `glViewport [${p.glViewport}]  lost ${p.contextLost}`,
+      `internal ${p.internal.join('x')}  step ${d.pixelScale}  device ${d.deviceWidth}x${d.deviceHeight}`,
+      `present.attr ${p.present.join('x')}  gl.attr ${p.glCanvas.join('x')}`,
+      `drawingBuffer ${p.drawingBuffer.join('x')}  glViewport [${p.glViewport}]  lost ${p.contextLost}`,
       `maxTex ${p.maxTexture}  maxViewport ${p.maxViewport.join('x')}`,
       `fps ${game.loop.fps.toFixed(0)}  calls ${game.renderer.drawCalls}`,
     ].join('\n');

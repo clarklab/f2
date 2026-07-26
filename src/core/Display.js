@@ -48,15 +48,6 @@ const MAX_W = 340;
 const MAX_H = 680;
 const MAX_PIXELS = 210_000;
 
-// Scale applied to the scene canvas's drawing buffer. 1 means it matches the
-// stage exactly and the browser does no scaling at all. Overridable at runtime
-// purely as a diagnostic — see `deviceWidth` below.
-const OUT_SCALE = (() => {
-  const m = /[?&]out=([0-9.]+)/.exec(location.search);
-  const v = m ? parseFloat(m[1]) : 1;
-  return Number.isFinite(v) && v > 0.05 && v <= 1 ? v : 1;
-})();
-
 export class Display {
   constructor() {
     this.stage = document.getElementById('stage');
@@ -70,6 +61,11 @@ export class Display {
     this.scale = 1;
 
     this.ui = this.uiCanvas.getContext('2d', { alpha: true });
+    // The scene canvas is a plain 2D canvas too: the WebGL context lives on an
+    // offscreen canvas owned by PixelRenderer, which drawImage()s each finished
+    // frame in here. See PixelRenderer's header for why WebGL is never allowed
+    // to talk to the compositor directly.
+    this.present = this.sceneCanvas.getContext('2d', { alpha: false });
 
     this._onResize = this.resize.bind(this);
     window.addEventListener('resize', this._onResize, { passive: true });
@@ -154,25 +150,25 @@ export class Display {
     this.pixelScale = step;
     this.scale = cw / r.w;            // CSS pixels per game pixel
 
-    // Device-pixel size of the stage. The scene canvas takes this as its
-    // drawing buffer so the browser never has to scale it — see PixelRenderer.
-    //
-    // `?out=<n>` scales it, for bisecting a fault that only appears on one
-    // physical device. A full-resolution buffer on a tall phone is ~10 MB, and
-    // a browser under GPU memory pressure (a hundred open tabs, say) can hand
-    // back less than was asked for. Halving it is a one-tap way to find out
-    // whether size is the variable, without a rebuild or a redeploy.
-    this.deviceWidth = Math.max(2, Math.round(dw * OUT_SCALE));
-    this.deviceHeight = Math.max(2, Math.round(dh * OUT_SCALE));
+    // Device-pixel size of the stage. Nothing renders at this size any more —
+    // it is kept for the ?debug readout, where comparing it against the CSS box
+    // is what caught the URL-bar height disagreement.
+    this.deviceWidth = dw;
+    this.deviceHeight = dh;
 
     if (changed) {
-      // Only the UI canvas. The scene canvas's buffer belongs to the renderer,
-      // which sizes it to the device instead.
-      this.uiCanvas.width = r.w;
-      this.uiCanvas.height = r.h;
-      // Assigning a backing-store size resets every 2D context flag, so the one
-      // that actually matters has to be reapplied here rather than once at setup.
+      // Both canvases carry the internal resolution and are stretched by CSS.
+      // The scene canvas receives its pixels via drawImage from the offscreen
+      // WebGL canvas, so its backing store has to match what the renderer
+      // draws — PixelRenderer.resize() runs from the same onResize hook.
+      for (const c of [this.sceneCanvas, this.uiCanvas]) {
+        c.width = r.w;
+        c.height = r.h;
+      }
+      // Assigning a backing-store size resets every 2D context flag, so the
+      // ones that matter have to be reapplied here rather than once at setup.
       this.ui.imageSmoothingEnabled = false;
+      this.present.imageSmoothingEnabled = false;
     }
 
     const w = Math.round(cw);
