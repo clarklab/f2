@@ -306,6 +306,26 @@ export class PixelRenderer {
     r.render(this.postScene, this.postCamera);
   }
 
+  /**
+   * Everything the black-band investigation needs, read from the live GL
+   * context rather than from anything this class believes about itself. If our
+   * bookkeeping and the driver ever disagree, this is where it shows.
+   */
+  probe() {
+    const gl = this.renderer.getContext();
+    const cv = this.renderer.domElement;
+    return {
+      internal: [this._w, this._h],
+      requestedOut: [this._outW, this._outH],
+      canvasAttr: [cv.width, cv.height],
+      drawingBuffer: [gl.drawingBufferWidth, gl.drawingBufferHeight],
+      glViewport: Array.from(gl.getParameter(gl.VIEWPORT)),
+      maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE),
+      maxViewport: Array.from(gl.getParameter(gl.MAX_VIEWPORT_DIMS)),
+      contextLost: this.contextLost,
+    };
+  }
+
   get drawCalls() { return this.renderer.info.render.calls; }
   get triangles() { return this.renderer.info.render.triangles; }
 

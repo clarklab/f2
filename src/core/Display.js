@@ -48,6 +48,15 @@ const MAX_W = 340;
 const MAX_H = 680;
 const MAX_PIXELS = 210_000;
 
+// Scale applied to the scene canvas's drawing buffer. 1 means it matches the
+// stage exactly and the browser does no scaling at all. Overridable at runtime
+// purely as a diagnostic — see `deviceWidth` below.
+const OUT_SCALE = (() => {
+  const m = /[?&]out=([0-9.]+)/.exec(location.search);
+  const v = m ? parseFloat(m[1]) : 1;
+  return Number.isFinite(v) && v > 0.05 && v <= 1 ? v : 1;
+})();
+
 export class Display {
   constructor() {
     this.stage = document.getElementById('stage');
@@ -82,8 +91,22 @@ export class Display {
    * match it, so the canvases fill the screen with no black surround.
    */
   resize() {
-    const vw = Math.max(1, window.visualViewport?.width ?? window.innerWidth);
-    const vh = Math.max(1, window.visualViewport?.height ?? window.innerHeight);
+    // Three different numbers claim to be "the height of the viewport" and on
+    // mobile they disagree, because the URL bar and the gesture bar overlay the
+    // page rather than shrinking it. Take the smallest: a stage larger than the
+    // screen pushes the HUD off the bottom edge, and there is no upside to
+    // guessing high.
+    const de = document.documentElement;
+    const vw = Math.max(1, Math.min(
+      window.visualViewport?.width ?? Infinity,
+      de?.clientWidth || Infinity,
+      window.innerWidth || Infinity,
+    ));
+    const vh = Math.max(1, Math.min(
+      window.visualViewport?.height ?? Infinity,
+      de?.clientHeight || Infinity,
+      window.innerHeight || Infinity,
+    ));
 
     // The tallest box the layouts tolerate that fits the viewport. When the
     // viewport is already inside the clamp this *is* the viewport, exactly.
@@ -132,11 +155,15 @@ export class Display {
     this.scale = cw / r.w;            // CSS pixels per game pixel
 
     // Device-pixel size of the stage. The scene canvas takes this as its
-    // drawing buffer so the browser never has to scale it — see PixelRenderer,
-    // where handing Chrome for Android a tiny WebGL buffer to stretch turned
-    // out to paint the scene into a fraction of its own element.
-    this.deviceWidth = dw;
-    this.deviceHeight = dh;
+    // drawing buffer so the browser never has to scale it — see PixelRenderer.
+    //
+    // `?out=<n>` scales it, for bisecting a fault that only appears on one
+    // physical device. A full-resolution buffer on a tall phone is ~10 MB, and
+    // a browser under GPU memory pressure (a hundred open tabs, say) can hand
+    // back less than was asked for. Halving it is a one-tap way to find out
+    // whether size is the variable, without a rebuild or a redeploy.
+    this.deviceWidth = Math.max(2, Math.round(dw * OUT_SCALE));
+    this.deviceHeight = Math.max(2, Math.round(dh * OUT_SCALE));
 
     if (changed) {
       // Only the UI canvas. The scene canvas's buffer belongs to the renderer,

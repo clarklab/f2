@@ -756,3 +756,51 @@ class Game {
 const game = new Game();
 window.__game = game;
 window.__THREE = THREE;
+
+/**
+ * `?debug` — an on-screen geometry readout, as plain DOM.
+ *
+ * It exists because a rendering fault that only appears on one physical device
+ * cannot be diagnosed from a screenshot: measuring UI anchors in a photo of a
+ * screen gives numbers with enough error to support several contradictory
+ * theories, which is exactly what happened. This prints what the device
+ * actually believes, so there is nothing left to infer.
+ *
+ * Deliberately not drawn on either canvas. The canvases are the thing under
+ * investigation; a readout rendered by a suspect is not evidence.
+ */
+if (/[?&]debug\b/.test(location.search)) {
+  const el = document.createElement('div');
+  el.style.cssText = [
+    'position:fixed', 'left:0', 'top:0', 'right:0', 'z-index:99',
+    'background:rgba(0,0,0,0.86)', 'color:#5cff9d', 'padding:6px 8px',
+    'font:11px/1.35 ui-monospace,Menlo,Consolas,monospace',
+    'white-space:pre', 'pointer-events:none', 'overflow-x:auto',
+  ].join(';');
+  document.body.appendChild(el);
+
+  const rect = (node) => {
+    const r = node.getBoundingClientRect();
+    return `${r.left.toFixed(0)},${r.top.toFixed(0)} ${r.width.toFixed(0)}x${r.height.toFixed(0)}`;
+  };
+
+  setInterval(() => {
+    const d = game.display;
+    const p = game.renderer.probe();
+    const vv = window.visualViewport;
+    const de = document.documentElement;
+    el.textContent = [
+      `dpr ${devicePixelRatio}  inner ${innerWidth}x${innerHeight}  client ${de.clientWidth}x${de.clientHeight}`,
+      `visualViewport ${vv ? `${vv.width.toFixed(0)}x${vv.height.toFixed(0)} @${vv.offsetLeft.toFixed(0)},${vv.offsetTop.toFixed(0)}` : 'n/a'}`,
+      `stage  ${rect(d.stage)}`,
+      `scene  ${rect(d.sceneCanvas)}`,
+      `ui     ${rect(d.uiCanvas)}`,
+      `internal ${p.internal.join('x')}  step ${d.pixelScale}`,
+      `device ${d.deviceWidth}x${d.deviceHeight}  requestedOut ${p.requestedOut.join('x')}`,
+      `canvas.attr ${p.canvasAttr.join('x')}  drawingBuffer ${p.drawingBuffer.join('x')}`,
+      `glViewport [${p.glViewport}]  lost ${p.contextLost}`,
+      `maxTex ${p.maxTexture}  maxViewport ${p.maxViewport.join('x')}`,
+      `fps ${game.loop.fps.toFixed(0)}  calls ${game.renderer.drawCalls}`,
+    ].join('\n');
+  }, 500);
+}
