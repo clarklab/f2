@@ -118,11 +118,27 @@ export class Driver {
     return this._limitFor(worst);
   }
 
+  /**
+   * The cornering envelope this driver is currently willing to use.
+   *
+   * A rail graze costs a fixed slice of the tank, which is a rounding error at
+   * full energy and fatal at a tenth of one. So the envelope narrows as the
+   * machine gets close to death: it stops trying to hold the limit through
+   * corners and starts trying to finish. Without this the AI dies *while
+   * leading*, having driven perfectly and ground itself to nothing on the
+   * rails — which is exactly what the attract mode kept doing on the last
+   * circuit of the championship.
+   */
+  get grip() {
+    const e = this.v.energy01;
+    return e < 0.3 ? this.corneringLimit * lerp(0.76, 1, e / 0.3) : this.corneringLimit;
+  }
+
   /** Both speed limits for a given curvature; the tighter one wins. */
   _limitFor(k) {
     if (k < 1e-5) return Infinity;
     const p = this.v.params;
-    const gripLimit = Math.sqrt(this.corneringLimit / k);
+    const gripLimit = Math.sqrt(this.grip / k);
 
     // Fixed-point solve for the speed at which yaw authority exactly matches
     // the required turn rate. Two iterations converge well inside our tolerance.
@@ -204,10 +220,15 @@ export class Driver {
     const sB = s + lookahead;
     const halfWidth = path.widthAt(sB) * 0.5;
 
+    // A recharge strip is worth nothing on a full tank and worth abandoning the
+    // racing line for on the last of it. Leaving this at zero — as it was —
+    // meant the AI drove past the one thing on the circuit that could save it,
+    // every lap, and then died.
+    const need = clamp01((0.78 - this.v.energy01) / 0.58);
     const COST = {
       [SURFACE.ROAD]: 0,
       [SURFACE.BOOST]: -14,        // actively worth deviating for
-      [SURFACE.RECHARGE]: 0,
+      [SURFACE.RECHARGE]: -95 * need * need,
       [SURFACE.JUMP]: -2,
       [SURFACE.DIRT]: 26,
       [SURFACE.ICE]: 18,

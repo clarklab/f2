@@ -503,6 +503,18 @@ export class Audio {
     this.chip([43, 41, 43, 41, 43, 41, 40, 40], { dur: 0.3, duty: 0.125, gain: 0.28 });
   }
 
+  /**
+   * The contact click for a screen tap — deliberately not one of the menu
+   * sounds above.
+   *
+   * A tap and the thing it activates are two separate events, and in the
+   * attract mode they are separated in time by a frame or two. Reusing
+   * `uiMove` for the tap made every menu press a stuttered double-blip;
+   * a short, quiet, high tick reads as a finger landing on glass and then
+   * gets out of the way of the menu's own answer.
+   */
+  uiTap() { this.chip([96], { dur: 0.028, duty: 0.125, gain: 0.11 }); }
+
   countdownBeep(n) {
     if (!this.ready) return;
     if (n > 0) {
