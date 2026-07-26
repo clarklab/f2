@@ -69,6 +69,16 @@ export class Input {
     this._pendingReleased = new Set();
     this._pendingTap = null;
 
+    // Attract mode drives the real UI through `virtualTap`, so the game needs to
+    // tell a synthesised tap from a human one — otherwise the demo's own taps
+    // would read as "somebody touched the screen" and cancel it on the first
+    // menu press. `realInput` is true only for the frame after a genuine key,
+    // pointer or pad event; `_virtualTapAge` releases a synthesised CONFIRM a
+    // step after it is consumed, the way a quick thumb tap does.
+    this.realInput = false;
+    this._sawRealInput = false;
+    this._virtualTapAge = null;
+
     this.lastDevice = 'keyboard';
     this.hasTouch = false;
     // The driving control zones only exist while racing. On menus the whole
@@ -104,6 +114,7 @@ export class Input {
       if (a || e.code === 'Space') e.preventDefault();
       this._keys.add(e.code);
       this.lastDevice = 'keyboard';
+      this._sawRealInput = true;
       if (a) this._press(a);
     });
 
@@ -160,6 +171,7 @@ export class Input {
   _onPointerDown(e) {
     this.hasTouch = this.hasTouch || e.pointerType === 'touch';
     this.lastDevice = e.pointerType === 'touch' ? 'touch' : 'mouse';
+    this._sawRealInput = true;
     this.display.stage.setPointerCapture?.(e.pointerId);
     const p = this.display.toVirtual(e.clientX, e.clientY);
     const L = this.layout;
@@ -253,7 +265,7 @@ export class Input {
 
     const active = ax !== 0 || rt > 0.05 || lt > 0.05 || a || b || lb || rb || start ||
       dpad.up || dpad.down || dpad.left || dpad.right;
-    if (active) this.lastDevice = 'gamepad';
+    if (active) { this.lastDevice = 'gamepad'; this._sawRealInput = true; }
 
     return { ax, rt, lt, a, b, lb, rb, start, dpad };
   }
@@ -267,6 +279,16 @@ export class Input {
     // Gamepad first, so its edges land in the same batch as everything else
     // rather than a step late.
     const pad = this._pollGamepad();
+
+    this.realInput = this._sawRealInput;
+    this._sawRealInput = false;
+
+    // A synthesised tap is held for one step and then let go, so menu code sees
+    // the same press/release pair a thumb produces.
+    if (this._virtualTapAge !== null && ++this._virtualTapAge >= 2) {
+      this._virtualTapAge = null;
+      this._release(Action.CONFIRM);
+    }
 
     // Consume the edges staged since the previous step.
     this.justPressed.clear();
@@ -364,12 +386,28 @@ export class Input {
   /** Where the player tapped this frame, in internal pixels, or null. */
   get tapPoint() { return this._tapPoint ?? null; }
 
+  /**
+   * Press the screen at (x, y) as if a thumb had, in internal pixels.
+   *
+   * This is the attract mode's only way in, and deliberately so: it goes down
+   * the same path as a real tap — CONFIRM edge plus a tap point — so the demo
+   * cannot drift out of step with a UI that has changed underneath it. It does
+   * not touch `_sawRealInput`, which is what keeps the demo from cancelling
+   * itself the moment it presses its first button.
+   */
+  virtualTap(x, y) {
+    this._pendingTap = { x, y };
+    this._press(Action.CONFIRM);
+    this._virtualTapAge = 0;
+  }
+
   reset() {
     this._keys.clear();
     this.down.clear();
     this._pendingPressed.clear();
     this._pendingReleased.clear();
     this._pendingTap = null;
+    this._virtualTapAge = null;
     this._pointers.clear();
     this._touchSteer = 0;
     this._touchBrake = 0;

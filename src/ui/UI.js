@@ -481,6 +481,87 @@ export class UI {
   }
 
   // -------------------------------------------------------------------
+  // Attract mode
+  // -------------------------------------------------------------------
+
+  /**
+   * A hard-edged circle, plotted a pixel at a time.
+   *
+   * `ctx.arc` is the obvious way to do this and the wrong one here: at 270
+   * pixels across, an anti-aliased stroke spreads a one-pixel ring over three
+   * columns of half-lit grey, and after the nearest-neighbour upscale that is a
+   * blurred smear sitting on top of art that has no other soft edge in it. The
+   * midpoint algorithm gives a ring made of whole pixels, which is what the
+   * rest of the screen is made of.
+   */
+  _pixelRing(cx, cy, radius, color, alpha = 1) {
+    if (alpha <= 0.02) return;
+    const c = this.ctx;
+    const ox = Math.round(cx);
+    const oy = Math.round(cy);
+    const r = Math.round(radius);
+    if (r < 1) return;
+    c.globalAlpha = clamp01(alpha);
+    c.fillStyle = color;
+    let x = r;
+    let y = 0;
+    let err = 1 - r;
+    while (x >= y) {
+      for (const [px, py] of [
+        [x, y], [y, x], [-y, x], [-x, y], [-x, -y], [-y, -x], [y, -x], [x, -y],
+      ]) c.fillRect(ox + px, oy + py, 1, 1);
+      y++;
+      if (err < 0) err += 2 * y + 1;
+      else { x--; err += 2 * (y - x) + 1; }
+    }
+    c.globalAlpha = 1;
+  }
+
+  /**
+   * The attract mode's tap markers and its label.
+   *
+   * The rings are the whole trick: an autoplaying menu with no visible cause
+   * reads as a video, but a ring blooming under a button a beat before the
+   * screen changes reads as somebody playing. So each ring is drawn *at* the
+   * point that was fed to the input layer, not near it — it is a picture of the
+   * real event, which is also why it doubles as a debugging aid when a tap
+   * lands somewhere the script did not intend.
+   */
+  drawDemoOverlay(demo) {
+    const { W, H } = this;
+    const c = this.ctx;
+
+    for (const r of demo.taps) {
+      const k = clamp01(r.t / 0.55);
+      const ease = 1 - (1 - k) * (1 - k);          // fast out, then settle
+      // Two rings a beat apart: one ping alone is easy to miss at 270 pixels
+      // across, and the pair reads unmistakably as a press.
+      this._pixelRing(r.x, r.y, 2 + ease * 13, PAL.accent, (1 - k) * 0.95);
+      if (k > 0.18) {
+        const k2 = clamp01((k - 0.18) / 0.6);
+        this._pixelRing(r.x, r.y, 1 + k2 * 9, PAL.ink, (1 - k2) * 0.5);
+      }
+      // A solid core for the first instants, so a tap still registers on the
+      // frames where the rings are only a few pixels across.
+      if (k < 0.4) {
+        c.globalAlpha = 1 - k / 0.4;
+        this.rect(r.x - 2, r.y - 2, 5, 5, PAL.warn);
+      }
+      c.globalAlpha = 1;
+    }
+
+    // The label sits at the very bottom, clear of every screen's own layout,
+    // and blinks so it never competes with what it is labelling.
+    if (this.blink(1.4, 0.68)) {
+      const y = H - 11;
+      this.rect(0, y - 3, W, 11, 'rgba(8,11,22,0.62)');
+      this.text('DEMO - TOUCH TO PLAY', W / 2, y, {
+        scale: 1, align: 'center', color: PAL.accent,
+      });
+    }
+  }
+
+  // -------------------------------------------------------------------
   // Results
   // -------------------------------------------------------------------
 

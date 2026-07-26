@@ -15,6 +15,7 @@ import { TRACKS, THEMES, trackById, GRAND_PRIX } from './track/tracks.js';
 import { ChaseCamera } from './game/ChaseCamera.js';
 import { Race, RACE_STATE } from './game/Race.js';
 import { MACHINES, machineById } from './game/Machines.js';
+import { Demo } from './game/Demo.js';
 import { UI, PAL } from './ui/UI.js';
 import { Audio } from './audio/Audio.js';
 import { TITLE_SONG, songForTheme } from './audio/songs.js';
@@ -108,6 +109,9 @@ class Game {
     this.menuRects = [];
 
     this.cup = null;
+    // Attract mode. It drives this same object through the input layer, so it
+    // has to be built after everything it will press.
+    this.demo = new Demo(this);
     this._audioArmed = false;
     this._armAudio();
 
@@ -260,6 +264,10 @@ class Game {
       // clumped into a shoving match; six leaves room to actually race.
       opponents: mode === 'trial' ? 0 : 5,
       spares: this.cup?.spares ?? 2,
+      // In attract mode the race director drives the player's machine itself.
+      // Passed in rather than set afterwards: the demo's driver is built with a
+      // different personality, and the grid is built in the constructor.
+      autopilot: this.demo.active,
     });
 
     this._disposeViews();
@@ -318,16 +326,26 @@ class Game {
     this.input.drivingControls = this._screen === SCREEN.RACE;
     this.input.update(dt);
 
-    switch (this._screen) {
-      case SCREEN.TITLE: this._updateTitle(dt); break;
-      case SCREEN.MODE: this._updateMode(dt); break;
-      case SCREEN.MACHINE: this._updateMachine(dt); break;
-      case SCREEN.TRACK: this._updateTrack(dt); break;
-      case SCREEN.RACE: this._updateRace(dt); break;
-      case SCREEN.PAUSE: this._updatePause(dt); break;
-      case SCREEN.RESULTS: this._updateResults(dt); break;
-      case SCREEN.RETIRED: this._updateRetired(dt); break;
-      default: break;
+    // The attract mode runs before the screens, because the taps it stages are
+    // read by them on the following step. A real touch that dismissed the demo
+    // is spent doing exactly that — it drops the player back on the title
+    // screen rather than punching straight through into the menus.
+    const wasDemo = this.demo.active;
+    this.demo.tick(dt, this._screen, this.input.realInput);
+    const dismissed = wasDemo && !this.demo.active;
+
+    if (!dismissed) {
+      switch (this._screen) {
+        case SCREEN.TITLE: this._updateTitle(dt); break;
+        case SCREEN.MODE: this._updateMode(dt); break;
+        case SCREEN.MACHINE: this._updateMachine(dt); break;
+        case SCREEN.TRACK: this._updateTrack(dt); break;
+        case SCREEN.RACE: this._updateRace(dt); break;
+        case SCREEN.PAUSE: this._updatePause(dt); break;
+        case SCREEN.RESULTS: this._updateResults(dt); break;
+        case SCREEN.RETIRED: this._updateRetired(dt); break;
+        default: break;
+      }
     }
 
     if (this.cinematic) {
@@ -769,6 +787,8 @@ class Game {
 
       default: break;
     }
+
+    if (this.demo.active) ui.drawDemoOverlay(this.demo);
 
     if (this.debug) {
       ui.drawDebug([

@@ -16,7 +16,7 @@ with no images, audio or fonts alongside them.
 npm install
 npm run dev      # http://localhost:5173
 npm run build    # -> dist/
-npm test         # 34 tests: track geometry, physics, race rules
+npm test         # 44 tests: track geometry, physics, race rules, attract mode
 ```
 
 ## Controls
@@ -33,6 +33,38 @@ npm test         # 34 tests: track geometry, physics, race rules
 Steering is a *relative* slider: wherever your thumb lands becomes centre, so
 there is nothing to aim for and no dead travel. Pushing past 80% engages the
 lean on that side automatically, which is what an expert would do anyway.
+
+## Attract mode
+
+Leave the title screen alone for seven seconds and the game plays itself, the
+way a cabinet does: it picks a machine, enters the championship, and races all
+six circuits back to back. Touch anything and it stops instantly and hands the
+game back — and that first touch is spent on the dismissal, so a stray tap drops
+you on the title screen rather than punching through into the menus.
+
+It drives the real UI. Every menu step is a synthesised *tap* at a real screen
+position, pushed through the same input path a thumb uses, so the demo exercises
+the actual code — a menu that has broken cannot be papered over by an attract
+mode that calls `setScreen` behind its back. The races are the real race
+director with `autopilot` on, so it is genuinely racing, not replaying anything.
+That makes it a live smoke test of the whole front end, which is how the
+machine-select tap regions ended up getting checked on every run for free.
+
+Building it turned up a real AI bug, which is the argument for attract modes in
+a sentence. The demo kept exploding on the last circuit of the championship
+*while leading* — it drove the perfect line, ground itself down on the rails,
+and died. The AI's lane chooser scored a recharge strip at exactly zero, so it
+drove past the one thing on the circuit that could save it, every lap. Recharge
+strips are now worth a detour in proportion to how much energy is missing, and
+the cornering envelope narrows as the tank empties: a rail graze that costs 13%
+of a full tank costs everything at 8%. Every AI on the grid got that fix, not
+just the demo.
+
+The taps are visible: a ring blooms where each one lands and a short tick plays,
+so what you see is a person playing rather than a cutscene. The rings are
+plotted with the midpoint circle algorithm instead of `ctx.arc` — at 270 pixels
+across, an anti-aliased stroke smears a one-pixel ring over three columns of
+half-lit grey, and nothing else on the screen has a soft edge.
 
 ## How it drives
 
@@ -232,7 +264,7 @@ and the title never flashes an empty logo while a separate file loads.
 src/
   core/      display, fixed-timestep loop, input, save, math
   track/     spline + frames, loop authoring DSL, mesh builder, surfaces
-  game/      vehicle physics, machines, AI driver, race director, camera
+  game/      vehicle physics, machines, AI driver, race director, camera, attract mode
   render/    low-res pipeline, procedural textures, machine models, world, scenery
   audio/     synthesis, sequencer, songs
   ui/        bitmap font, screens, HUD, minimap
@@ -282,12 +314,25 @@ track each tick until it reached 1e50 metres, and a packed grid quietly damaging
 itself to death because two cars travelling side by side at the same speed
 counted as grinding against each other.
 
+`tools/touchflow.mjs` and `tools/demoflow.mjs` drive a real browser with real
+touch events: the first walks the menus by hand, the second leaves the title
+screen alone and watches the attract mode take over, browse the roster, start
+the championship and get out of the way when the screen is touched. Menu
+navigation is the easiest thing in a game to break silently, because it is the
+one part that never runs during development — you reload straight into whatever
+you are working on.
+
 ## Notes
 
 - `prefers-reduced-motion` is respected: screen shake and camera flourishes damp down.
 - Audio is built before the first user gesture and only *resumed* inside it, so
   the gesture handler does no real work and there is no hitch on the first tap.
 - `localStorage` is optional; the game runs identically without it.
+- The attract mode is silent on a page nobody has touched yet — browsers refuse
+  to start an `AudioContext` without a user gesture, and there is no way around
+  it. The synthesised taps are not gestures and deliberately do not pretend to
+  be. Touch the screen once (which hands the game back) and every later attract
+  run has full audio.
 - Re-bake the logo with `node tools/make-logo.mjs tools/logo-source.png 240`.
 - `netlify.toml` builds before publishing. Without it Netlify serves the repo
   root, which means raw unbundled source and a bare `three` import the browser
