@@ -144,9 +144,15 @@ export class UI {
       });
     }
 
-    this.rect(0, H - 32, W, 32, 'rgba(8,11,22,0.66)');
-    this.text('BUILT WITH THREE.JS', W / 2, H - 26, { scale: 1, align: 'center', color: PAL.dim });
-    this.text('NO OUTSIDE ASSETS - ALL ORIGINAL', W / 2, H - 16, {
+    // Lifted clear of the bottom edge. Flush against it, the credits sat under
+    // the home indicator on a gesture-navigation phone and got read as part of
+    // the system chrome rather than as part of the game.
+    const creditY = H - 58;
+    this.rect(0, creditY, W, 26, 'rgba(8,11,22,0.66)');
+    this.text('BUILT WITH THREE.JS', W / 2, creditY + 6, {
+      scale: 1, align: 'center', color: PAL.dim,
+    });
+    this.text('NO OUTSIDE ASSETS - ALL ORIGINAL', W / 2, creditY + 16, {
       scale: 1, align: 'center', color: PAL.dim,
     });
   }
@@ -538,7 +544,7 @@ export class UI {
   }
 
   /**
-   * The attract mode's tap markers and its label.
+   * The attract mode's tap markers, and nothing else.
    *
    * The rings are the whole trick: an autoplaying menu with no visible cause
    * reads as a video, but a ring blooming under a button a beat before the
@@ -546,9 +552,13 @@ export class UI {
    * point that was fed to the input layer, not near it — it is a picture of the
    * real event, which is also why it doubles as a debugging aid when a tap
    * lands somewhere the script did not intend.
+   *
+   * There is deliberately no "DEMO" caption. The rings already say a person is
+   * playing, and the screens the demo walks through carry their own prompts;
+   * a banner on top of them is just a second thing competing for the same
+   * glance, and it sat over the bottom of the HUD during the races.
    */
   drawDemoOverlay(demo) {
-    const { W, H } = this;
     const c = this.ctx;
 
     for (const r of demo.taps) {
@@ -568,16 +578,6 @@ export class UI {
         this.rect(r.x - 2, r.y - 2, 5, 5, PAL.warn);
       }
       c.globalAlpha = 1;
-    }
-
-    // The label sits at the very bottom, clear of every screen's own layout,
-    // and blinks so it never competes with what it is labelling.
-    if (this.blink(1.4, 0.68)) {
-      const y = H - 11;
-      this.rect(0, y - 3, W, 11, 'rgba(8,11,22,0.62)');
-      this.text('DEMO - TOUCH TO PLAY', W / 2, y, {
-        scale: 1, align: 'center', color: PAL.accent,
-      });
     }
   }
 

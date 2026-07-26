@@ -16,7 +16,7 @@ with no images, audio or fonts alongside them.
 npm install
 npm run dev      # http://localhost:5173
 npm run build    # -> dist/
-npm test         # 45 tests: track geometry, physics, race rules, attract mode
+npm test         # 46 tests: track geometry, physics, race rules, attract mode
 ```
 
 ## Controls
@@ -74,7 +74,18 @@ The taps are visible: a ring blooms where each one lands and a short tick plays,
 so what you see is a person playing rather than a cutscene. The rings are
 plotted with the midpoint circle algorithm instead of `ctx.arc` — at 270 pixels
 across, an anti-aliased stroke smears a one-pixel ring over three columns of
-half-lit grey, and nothing else on the screen has a soft edge.
+half-lit grey, and nothing else on the screen has a soft edge. There is no
+"DEMO" caption: the rings already say somebody is playing, and a banner is just
+a second thing competing for the same glance.
+
+It also takes a screen wake lock, because minutes of no input is precisely the
+condition a phone reads as "nobody is here" before dimming. The lock is
+best-effort — absent on older browsers, refused under battery saver — and
+released the moment anyone touches the screen, so a real player's own idle timer
+takes over again. The one non-obvious part is that a screen lock is dropped
+whenever the page stops being visible and is *not* restored when it comes back,
+so intent and possession are tracked separately and reconciled on
+`visibilitychange`.
 
 ## How it drives
 
@@ -272,7 +283,7 @@ and the title never flashes an empty logo while a separate file loads.
 
 ```
 src/
-  core/      display, fixed-timestep loop, input, save, math
+  core/      display, fixed-timestep loop, input, save, math, wake lock
   track/     spline + frames, loop authoring DSL, mesh builder, surfaces
   game/      vehicle physics, machines, AI driver, race director, camera, attract mode
   render/    low-res pipeline, procedural textures, machine models, world, scenery
