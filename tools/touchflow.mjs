@@ -74,6 +74,21 @@ steps.push({ label: 'mode rows are laid out', expected: true, got: modeRow, ok: 
 if (modeRow) await tapRow(1);
 await record('after choosing a mode', 'machine');
 
+// Machine select: an arrow tap must cycle machines and STAY on this screen.
+// This is the regression test for the bug where every tap also raised the
+// CONFIRM action and browsing machines instantly started a race.
+const beforeArrow = await page.evaluate(() => window.__game.machineIndex);
+await tapAt(0.15, 0.4);
+const afterArrow = await page.evaluate(() => window.__game.machineIndex);
+steps.push({
+  label: 'arrow tap cycles machines without confirming',
+  expected: true,
+  got: afterArrow !== beforeArrow
+    && (await page.evaluate(() => window.__game._screen)) === 'machine',
+  ok: false,
+});
+steps[steps.length - 1].ok = steps[steps.length - 1].got === true;
+
 // Machine -> circuit: tap the lower panel area to confirm.
 await tapAt(0.5, 0.78);
 await record('after choosing a machine', 'track');
