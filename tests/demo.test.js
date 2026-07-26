@@ -167,13 +167,32 @@ test('the demo waits out the idle timer before taking over', () => {
   assert.equal(demo.active, true, 'never started');
 });
 
-test('the idle timer only runs on the title screen', () => {
-  const g = fakeGame();
-  const demo = new Demo(g);
-  g.setScreen('mode');
-  run(demo, g, IDLE_BEFORE_DEMO * 3);
-  assert.equal(demo.active, false);
-  assert.equal(demo.idle, 0);
+test('the demo can take over from any browsing screen, not just the title', () => {
+  // The screen a visitor is most likely to be abandoned on is not the title
+  // one: the tap that unlocks audio lands them a screen deeper. If only the
+  // title screen counted, the attract mode became unreachable the moment
+  // anyone touched the game.
+  for (const screen of ['mode', 'machine', 'track']) {
+    const g = fakeGame();
+    const demo = new Demo(g);
+    g.setScreen(screen);
+    run(demo, g, 60, { stopWhen: () => demo.active });
+    assert.equal(demo.active, true, `never took over from ${screen}`);
+    assert.equal(g._screen, 'title', `did not return to the title screen from ${screen}`);
+  }
+});
+
+test('the idle timer never runs during a race or over held state', () => {
+  // These screens hold something a player would lose: a race in progress, a
+  // pause they will come back from, a classification they are still reading.
+  for (const screen of ['race', 'pause', 'results', 'retired']) {
+    const g = fakeGame();
+    const demo = new Demo(g);
+    g._screen = screen;
+    run(demo, g, IDLE_BEFORE_DEMO * 6);
+    assert.equal(demo.active, false, `hijacked the ${screen} screen`);
+    assert.equal(demo.idle, 0);
+  }
 });
 
 test('the demo walks the menus and reaches a race', () => {

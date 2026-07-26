@@ -159,6 +159,26 @@ export class UI {
    * A vertical list. Returns the hit rectangles so the caller can map taps.
    * @param {Array<{label:string, sub?:string, locked?:boolean}>} items
    */
+  /**
+   * The back control, and the tap region for it.
+   *
+   * Keyboard and gamepad have had a back button since the beginning; touch
+   * never did. That was not a cosmetic gap — it meant a phone could only ever
+   * move *forward* through the menus, so one stray tap on the title screen put
+   * you in the mode list with no way out but a reload, and no way back to the
+   * screen the attract mode starts from.
+   *
+   * The returned rect is deliberately larger than the glyph. A 5×7 chevron is
+   * an unhittable target on glass, and the top-left corner is empty on every
+   * screen this is drawn on, so the slack costs nothing.
+   */
+  drawBackButton() {
+    const y = 6;
+    this.text('<', 9, y + 3, { scale: 1, color: PAL.accent });
+    this.text('BACK', 17, y + 3, { scale: 1, color: PAL.dim });
+    return { x: 0, y: 0, w: 52, h: 26 };
+  }
+
   drawMenu(title, items, index, { top = 120, rowH = 34 } = {}) {
     const { W } = this;
     this.text(title, W / 2, 62, { scale: 2, align: 'center', color: PAL.accent });

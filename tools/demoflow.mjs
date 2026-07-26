@@ -48,6 +48,13 @@ const state = () => page.evaluate(() => {
   };
 });
 
+/** Tap at a fraction of the stage, in stage-relative coordinates. */
+async function tapAt(fx, fy) {
+  const box = await page.locator('#stage').boundingBox();
+  await page.touchscreen.tap(box.x + box.width * fx, box.y + box.height * fy);
+  await page.waitForTimeout(320);
+}
+
 /** Poll until `pred(state)` holds, or give up. */
 async function until(pred, ms, label) {
   const deadline = Date.now() + ms;
@@ -107,6 +114,36 @@ check('touch does not punch through to the menu', s.screen !== 'mode', JSON.stri
 // ...and the attract loop re-arms rather than dying.
 s = await until((x) => x.demo, 11000, 'demo re-arms after being dismissed');
 check('demo re-arms', s.demo, JSON.stringify(s));
+
+// --- the audio-unlock path -------------------------------------------------
+// The sequence a first-time visitor actually performs: tap early to start the
+// audio context (browsers will not start one without a gesture), which lands
+// them one screen into the menus, then wait. Before the idle timer ran on the
+// menus, and before touch had a back control, this was a dead end — the demo
+// could never come back, so it could never be heard.
+await page.reload({ waitUntil: 'load' });
+await page.waitForFunction(() => window.__game?._screen, null, { timeout: 15000 });
+await tapAt(0.5, 0.3);                       // unlock audio; lands on the mode menu
+s = await state();
+check('an early tap opens the menu', s.screen === 'mode', JSON.stringify(s));
+check('audio context is running', await page.evaluate(
+  () => window.__game.audio.ctx?.state === 'running',
+), 'audio did not unlock on a real touch');
+
+// Only that it takes over is asserted here. It walks back to the title screen
+// on the way, but the script's first tap moves straight off it again, so which
+// screen is up at the instant the poll catches it is a race — the unit tests
+// pin the return-to-title step, which is not timing-dependent there.
+s = await until((x) => x.demo, 30000, 'demo takes over from the menu');
+check('demo returns from inside the menu', s.demo, JSON.stringify(s));
+
+// --- touch can get back out of a menu on its own ---------------------------
+await page.reload({ waitUntil: 'load' });
+await page.waitForFunction(() => window.__game?._screen, null, { timeout: 15000 });
+await tapAt(0.5, 0.3);
+await tapAt(0.06, 0.012);                    // the back control, top-left
+s = await state();
+check('back leaves the mode menu', s.screen === 'title', JSON.stringify(s));
 
 console.log(JSON.stringify({ steps, errors: errors.slice(0, 6) }, null, 2));
 

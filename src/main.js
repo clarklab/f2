@@ -208,6 +208,9 @@ class Game {
     this._screen = name;
     this.menuIndex = 0;
     this.menuRects = [];
+    // Cleared here and set again by whichever screen draws one, so a stale rect
+    // from the previous screen cannot swallow a tap.
+    this.backRect = null;
     if (name === SCREEN.TITLE || name === SCREEN.MODE || name === SCREEN.TRACK) {
       this.cinematic = true;
     }
@@ -361,6 +364,20 @@ class Game {
     }
   }
 
+  /**
+   * Did this frame's tap land on the back control?
+   *
+   * Checked before anything else on a menu screen, because every tap also
+   * raises the CONFIRM action at the input layer — a back tap that fell
+   * through to the row handler would confirm whatever was highlighted.
+   */
+  _tappedBack() {
+    const t = this.input.tapPoint;
+    const r = this.backRect;
+    if (!t || !r) return false;
+    return t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h;
+  }
+
   /** Shared menu navigation: returns the chosen index, or -1. */
   _navigate(count, { horizontal = false } = {}) {
     const inp = this.input;
@@ -400,6 +417,7 @@ class Game {
   }
 
   _updateMode() {
+    if (this._tappedBack()) { this.audio.uiBack(); this.setScreen(SCREEN.TITLE); return; }
     const chosen = this._navigate(4);
     if (chosen < 0) {
       if (this.input.pressed(Action.BACK)) { this.audio.uiBack(); this.setScreen(SCREEN.TITLE); }
@@ -411,6 +429,7 @@ class Game {
   }
 
   _updateMachine(dt) {
+    if (this._tappedBack()) { this.audio.uiBack(); this.setScreen(SCREEN.MODE); return; }
     const inp = this.input;
     let moved = 0;
     if (inp.pressed(Action.LEFT)) moved = -1;
@@ -454,6 +473,7 @@ class Game {
   }
 
   _updateTrack() {
+    if (this._tappedBack()) { this.audio.uiBack(); this.setScreen(SCREEN.MACHINE); return; }
     const inp = this.input;
     let moved = 0;
     if (inp.pressed(Action.LEFT)) moved = -1;
@@ -735,16 +755,19 @@ class Game {
           { label: 'TIME TRIAL', sub: 'ALONE AGAINST THE CLOCK' },
           { label: 'PRACTICE', sub: 'FULL GRID, NO ELIMINATION' },
         ], this.menuIndex, { top: 130, rowH: 40 });
+        this.backRect = ui.drawBackButton();
         break;
 
       case SCREEN.MACHINE:
         ui.drawMachineSelect(MACHINES[this.machineIndex], this.machineIndex, MACHINES.length);
+        this.backRect = ui.drawBackButton();
         break;
 
       case SCREEN.TRACK:
         this.menuRects = ui.drawTrackSelect(
           TRACKS, this.paths, this.trackIndex, Save.data.records,
         );
+        this.backRect = ui.drawBackButton();
         break;
 
       case SCREEN.RACE: {
