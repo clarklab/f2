@@ -50,7 +50,7 @@ export class Driver {
     // a slightly different line, and reacts at a slightly different rate — the
     // cheapest way to stop a grid looking like a train.
     const r = this.rng;
-    this.corneringLimit = lerp(30, 46, this.skill) * lerp(0.9, 1.08, r());
+    this.corneringLimit = lerp(58, 92, this.skill) * lerp(0.9, 1.08, r());
     this.lineBias = (r() * 2 - 1) * 0.22;         // preferred offset from the ideal line
     this.reaction = lerp(0.16, 0.045, this.skill) * lerp(0.85, 1.2, r());
     this.aggression = lerp(0.3, 1.0, this.skill) * lerp(0.8, 1.15, r());
@@ -58,7 +58,7 @@ export class Driver {
     this.wobbleRate = 0.5 + r() * 0.9;
     this.boostAppetite = lerp(0.35, 0.95, this.skill);
     // How slowly this driver is willing to creep across a coated surface.
-    this.iceSpeed = lerp(34, 48, this.skill);
+    this.iceSpeed = lerp(48, 66, this.skill);
 
     this._steer = 0;
     this._throttle = 1;
@@ -103,7 +103,7 @@ export class Driver {
     const p = this.v.params;
     // Scan far enough ahead to start lifting before the corner, scaled by speed
     // so it always corresponds to roughly the same number of seconds.
-    const horizon = clamp(speed * 1.9, 60, 260);
+    const horizon = clamp(speed * 1.9, 60, 560);
     let worst = 0;
     const STEPS = 12;
     for (let i = 1; i <= STEPS; i++) {
@@ -195,7 +195,7 @@ export class Driver {
     const surfaces = this.v.track;
     if (!surfaces?.surfaceAt) return desiredD;
 
-    const lookahead = clamp(this.v.speed * 0.55, 22, 80);
+    const lookahead = clamp(this.v.speed * 0.55, 22, 170);
     // Three samples, and the near one matters most. With only far samples, a
     // machine already inside a mine field sees clear road beyond it and steers
     // back onto the racing line — straight through the mines it has left.
@@ -265,16 +265,34 @@ export class Driver {
         const o = opponents[i];
         if (o === v || !o.alive) continue;
         const ahead = path.deltaS(v.s, o.s);
-        if (ahead < 2 || ahead > 34) continue;
+        if (ahead < 2 || ahead > 60) continue;
         if (Math.abs(o.d - v.d) > 6.5) continue;
         // Pick the side with more road and commit to it.
         const halfWidth = path.widthAt(o.s) * 0.5;
         const roomLeft = o.d + halfWidth;
         const roomRight = halfWidth - o.d;
         const side = roomRight > roomLeft ? 1 : -1;
-        const urgency = 1 - ahead / 34;
+        const urgency = 1 - ahead / 60;
         targetD = o.d + side * (7.5 * (0.6 + urgency));
         break;
+      }
+    }
+
+    // The player gets a bigger bubble than other traffic, in both directions.
+    // Racing the AI should mean being raced against, not being boxed in and
+    // ground on — and the contact impulses make every touch cost real time, so
+    // the AI has its own reasons to stay clear too.
+    const pv = this.keepClearOf;
+    if (pv && pv.alive && pv !== v) {
+      const along = path.deltaS(v.s, pv.s);       // + means the player is ahead
+      if (Math.abs(along) < 44 && Math.abs(pv.d - v.d) < 10) {
+        const halfWidth = path.widthAt(v.s) * 0.5;
+        const away = Math.sign(v.d - pv.d) || (pv.d > 0 ? -1 : 1);
+        const urgency = 1 - Math.abs(along) / 44;
+        targetD = clamp(
+          pv.d + away * (9 + 4 * urgency),
+          -halfWidth * 0.94, halfWidth * 0.94,
+        );
       }
     }
 
@@ -287,7 +305,7 @@ export class Driver {
     this._targetD = targetD;
 
     // --- pure pursuit steering ---
-    const lookahead = clamp(v.speed * 0.42, 14, 58);
+    const lookahead = clamp(v.speed * 0.42, 14, 130);
     path.toWorld(v.s + lookahead, targetD, v.params.rideHeight, _target);
     _v.subVectors(_target, v.pos);
     _v.addScaledVector(v.up, -_v.dot(v.up));      // flatten into the surface plane
@@ -304,7 +322,7 @@ export class Driver {
     // of what the cornering-limit maths says.
     const needsTurning = Math.abs(this._steer) > 0.25;
     const slipCeiling = needsTurning ? p.slipSpeed * 1.02 : Infinity;
-    const iceLimit = this.iceSpeedLimit(path, v.s, clamp(v.speed * 1.6, 70, 190));
+    const iceLimit = this.iceSpeedLimit(path, v.s, clamp(v.speed * 1.6, 70, 430));
     const target = Math.min(limit, slipCeiling, iceLimit) * lerp(0.86, 1.0, this.skill);
 
     this._overspeed = v.speed / Math.max(1, target);

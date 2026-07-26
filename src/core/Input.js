@@ -194,9 +194,10 @@ export class Input {
     const p = this.display.toVirtual(e.clientX, e.clientY);
     if (rec.role === 'steer') {
       rec.x = p.x;
-      // ~22% of screen width of travel for full lock: enough to be precise,
-      // short enough that a thumb can reach the extremes without shifting grip.
-      const range = this.display.width * 0.22;
+      // ~15% of screen width of travel for full lock. It was 22%, and at the
+      // current pace that read as unresponsive — a small drag should visibly
+      // throw the machine.
+      const range = this.display.width * 0.15;
       this._touchSteer = clamp((p.x - rec.originX) / range, -1, 1);
     }
     e.preventDefault();

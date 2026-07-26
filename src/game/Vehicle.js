@@ -255,7 +255,7 @@ export class Vehicle {
     const onDash = this.surface === SURFACE.BOOST;
     if (onDash) {
       this.dashBonus = Math.max(this.dashBonus, p.topSpeed * 0.42);
-      this.speed = Math.min(this.speed + 150 * dt, p.topSpeed + this.dashBonus);
+      this.speed = Math.min(this.speed + 260 * dt, p.topSpeed + this.dashBonus);
       // Edge-triggered so the flash and the audio fire once per plate rather
       // than once per tick — the same discipline as the jump plates.
       if (!this._onDash) this.events.dash = true;
@@ -336,7 +336,7 @@ export class Vehicle {
     const onPlate = this.surface === SURFACE.JUMP;
     if (onPlate && !this._onJumpPlate && !this.airborne) {
       this.vel.addScaledVector(frame.up, 21);
-      this.speed += 8;
+      this.speed += 12;
       this.events.jump = true;
     }
     this._onJumpPlate = onPlate;
