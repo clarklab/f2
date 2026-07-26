@@ -769,6 +769,18 @@ window.__THREE = THREE;
  * Deliberately not drawn on either canvas. The canvases are the thing under
  * investigation; a readout rendered by a suspect is not evidence.
  */
+/**
+ * `?noui` — hide the 2D overlay canvas entirely.
+ *
+ * The other half of the bisect. If the scene fills its element with the UI
+ * canvas gone, the fault is in having two stacked composited canvases rather
+ * than in the WebGL one; if it still bands, the UI canvas is irrelevant and the
+ * scene canvas is at fault on its own. Either answer removes a suspect.
+ */
+if (/[?&]noui\b/.test(location.search)) {
+  game.display.uiCanvas.style.display = 'none';
+}
+
 if (/[?&]debug\b/.test(location.search)) {
   const el = document.createElement('div');
   el.style.cssText = [

@@ -57,7 +57,24 @@ body {
   width: 100%;
   height: 100%;
   display: block;
-  /* The whole aesthetic depends on this: no smoothing on upscale. */
+}
+
+/*
+ * Only the UI canvas asks for nearest-neighbour scaling, and only it needs to:
+ * it is a 270-wide bitmap stretched across the screen, so the browser really is
+ * magnifying it.
+ *
+ * The scene canvas is NOT listed here on purpose. Its drawing buffer matches
+ * its CSS box 1:1 — the shader does the magnification — so `image-rendering`
+ * has nothing to act on and is a pure no-op for the image. It is also the last
+ * remaining difference between the WebGL canvas and the 2D canvas that sits on
+ * top of it, and on the device where the scene renders into only the lower
+ * ~57% of its own element, the 2D canvas beside it composites perfectly. A
+ * scaling hint on a composited WebGL layer that requires no scaling is exactly
+ * the sort of thing that pushes a mobile compositor onto an unusual path, and
+ * it buys nothing here.
+ */
+#ui {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
